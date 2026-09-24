@@ -61,6 +61,50 @@ export const LESS_FORBIDDEN_PREFIX = '@wikimedia/codex-design-tokens/';
 export const CORE_LESS_IMPORT_DIR = 'resources/src/mediawiki.less';
 
 /**
+ * Repositories that a wiki gets only as a git submodule of another.
+ *
+ * VisualEditor/VisualEditor is the editor library. A wiki has it at lib/ve
+ * inside the VisualEditor extension, and ResourceLoader names its files
+ * from there: src/dm/ve.dm.LinearData.js is lib/ve/src/dm/ve.dm.LinearData.js
+ * on the wiki. Check against the parent's .gitmodules.
+ *
+ * `serverFiles` are files in the library that the server reads, so a change
+ * to them needs a deploy.
+ */
+export const SUBMODULE_MOUNTS = {
+	'VisualEditor/VisualEditor': {
+		project: 'mediawiki/extensions/VisualEditor',
+		path: 'lib/ve',
+		serverFiles: {
+			'build/modules.json': 'The VisualEditor extension reads this on the server to ' +
+				'build its modules, so a new, moved or removed file needs a deploy.'
+		}
+	}
+};
+
+/**
+ * Where a submodule repository sits inside its parent, if it is one.
+ *
+ * @param {string} project
+ * @return {{ project: string, path: string, serverFiles: Object }|null}
+ */
+export function mountFor( project ) {
+	return SUBMODULE_MOUNTS[ project ] || null;
+}
+
+/**
+ * The path ResourceLoader uses for a repository file.
+ *
+ * @param {string} project
+ * @param {string} path Path inside that repository.
+ * @return {string}
+ */
+export function installedPath( project, path ) {
+	const mount = mountFor( project );
+	return mount ? `${ mount.path }/${ path }` : path;
+}
+
+/**
  * Say what a Gerrit project is.
  *
  * @param {string} project
@@ -79,6 +123,16 @@ export function classifyProject( project ) {
 	m = /^mediawiki\/skins\/([^/]+)$/.exec( project );
 	if ( m ) {
 		return { type: 'skin', name: m[ 1 ], installPath: `skins/${ m[ 1 ] }` };
+	}
+	const mount = mountFor( project );
+	if ( mount ) {
+		const parent = classifyProject( mount.project );
+		return {
+			type: 'submodule',
+			name: project.split( '/' ).pop(),
+			installPath: parent.installPath === null ? null :
+				joinPath( parent.installPath, mount.path )
+		};
 	}
 	return { type: 'other', name: null, installPath: null };
 }
@@ -119,6 +173,11 @@ export function projectForSkin( skinKey ) {
  * @return {string[]}
  */
 export function modulePrefixesForProject( project ) {
+	// A submodule's files are served by its parent's modules.
+	const mount = mountFor( project );
+	if ( mount ) {
+		return modulePrefixesForProject( mount.project );
+	}
 	const info = classifyProject( project );
 	if ( info.type === 'core' ) {
 		return [ 'mediawiki.', 'jquery.', 'oojs', 'vue', 'codex' ];

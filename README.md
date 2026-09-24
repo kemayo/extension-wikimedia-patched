@@ -16,6 +16,8 @@ It can apply:
 - New JavaScript files added to a ResourceLoader module
 - English messages from `i18n/en.json`
 - Stylesheets, including their `@import` chain across repositories
+- Patches to the VisualEditor library (`VisualEditor/VisualEditor`), which a
+  wiki carries at `lib/ve` inside the extension — in debug mode only
 - Changes to existing JavaScript files, with a warning when the wiki runs a
   different base than the patch was written against
 
@@ -145,6 +147,28 @@ may wait:
 If the data has not arrived after two seconds, the modules are released
 unpatched and the popup says so. The report and the console say how many
 modules waited and for how long.
+
+### Modules served as one script
+
+A `scripts` module, such as `ext.visualEditor.core`, has no file map:
+ResourceLoader joins every file into one function. In debug mode each file
+is in there verbatim, so the extension finds the file by its text and swaps
+in the patched version, then rebuilds the function. For change 1342010 that
+is a 60KB file inside a 2MB module, and the splice and recompile take about
+30ms.
+
+The file is found by any version of it an active patch knows about: what an
+earlier patch put there, the wmf branch copy, each patch's base. A match
+must be unique and at least 200 characters, so a short common snippet can
+never be mistaken for the file. If nothing matches, nothing is guessed.
+Outside debug mode the module is minified and cannot be searched, so it is
+left alone and the popup says so.
+
+Only modules that the patch's repository provides are searched. A library
+that a wiki gets as a submodule is mapped to its parent in
+`shared/mw-layout.js`: VisualEditor's `src/x.js` is `lib/ve/src/x.js`, and
+its modules are the VisualEditor extension's. `build/modules.json` is read by
+the server, so a change to it is reported as needing a deploy.
 
 ## When the wiki runs a different base
 

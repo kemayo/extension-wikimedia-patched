@@ -633,6 +633,171 @@
 			`Added to ${ moduleName } as ${ key }.` );
 	}
 
+	/** Changed files found and patched inside a combined script. */
+	let splicedScriptModules = 0;
+
+	/**
+	 * Find text that occurs exactly once.
+	 *
+	 * A short text can match by chance, and a text that occurs twice gives
+	 * no way to know which copy is the file. Both count as not found.
+	 *
+	 * @param {string} haystack
+	 * @param {string} needle
+	 * @return {number} The index, or -1.
+	 */
+	function findOnce( haystack, needle ) {
+		if ( needle.length < 200 ) {
+			return -1;
+		}
+		const at = haystack.indexOf( needle );
+		if ( at === -1 || haystack.indexOf( needle, at + 1 ) !== -1 ) {
+			return -1;
+		}
+		return at;
+	}
+
+	/** True if a patch's files could be in this module at all. */
+	function mayHold( patch, moduleName ) {
+		const prefixes = patch.modulePrefixes || [];
+		return !prefixes.length || prefixes.some( ( p ) => moduleName.startsWith( p ) );
+	}
+
+	/**
+	 * Patch files inside a module that ResourceLoader serves as one script.
+	 *
+	 * A "scripts" module, such as VisualEditor's core, has no file map:
+	 * every file is joined into one function. In debug mode each file is in
+	 * there verbatim, so a file can still be found by its text and swapped
+	 * for the patched text. The copy looked for is, in order, what an
+	 * earlier patch put there, the wiki's wmf branch copy, and the patch
+	 * base. Minified code cannot be searched, so outside debug mode this
+	 * does nothing and the popup says so.
+	 *
+	 * @param {Object} mw
+	 * @param {string} name
+	 * @param {Array} data
+	 */
+	function spliceScriptsModule( mw, name, data ) {
+		if ( !inDebugMode( mw ) ) {
+			legacyModules.push( name );
+			return;
+		}
+		const source = String( data[ 1 ] );
+		const header = /^function\s*\(([^)]*)\)\s*\{/.exec( source );
+		const close = source.lastIndexOf( '}' );
+		if ( !header || close <= header[ 0 ].length ) {
+			legacyModules.push( name );
+			return;
+		}
+		const params = header[ 1 ].split( ',' ).map( ( x ) => x.trim() ).filter( Boolean );
+		let body = source.slice( header[ 0 ].length, close );
+
+		// Records wait until the new function compiles, so a failure can
+		// replace them instead of contradicting them.
+		const pending = [];
+		const placements = [];
+		const trim = ( text ) => text.replace( /\s+$/, '' );
+
+		// Every version of each file that any active patch knows about. A
+		// patch built on another patch knows only that patch's result, which
+		// is not in the module until that patch runs. Another patch's base
+		// finds the file anyway, and the merge sorts out the rest.
+		const versions = new Map();
+		for ( const patch of payload.patches ) {
+			for ( const file of patch.replaceFiles || [] ) {
+				const key = pathOnWiki( file );
+				const list = versions.get( key ) || [];
+				for ( const text of [
+					file.deployed && file.deployed.source, file.parentSource, file.source
+				] ) {
+					if ( typeof text === 'string' ) {
+						list.push( text );
+					}
+				}
+				versions.set( key, list );
+			}
+		}
+
+		for ( const patch of payload.patches ) {
+			if ( !mayHold( patch, name ) ) {
+				continue;
+			}
+			for ( const file of patch.replaceFiles || [] ) {
+				const id = placedId( name, pathOnWiki( file ) );
+				// A patch earlier in this same pass wins over one from before:
+				// its text is what the module holds now.
+				const thisPass = placements.filter( ( pl ) => pl.id === id ).pop();
+				const earlier = thisPass || placed.get( id );
+				const candidates = [];
+				if ( earlier ) {
+					candidates.push( {
+						text: earlier.text, from: `patch ${ earlier.patchKey }`,
+						byPatch: earlier.patchKey
+					} );
+				}
+				if ( file.deployed && typeof file.deployed.source === 'string' ) {
+					candidates.push( { text: file.deployed.source, from: 'the running page', byPatch: null } );
+				}
+				if ( typeof file.parentSource === 'string' ) {
+					candidates.push( { text: file.parentSource, from: 'the running page', byPatch: null } );
+				}
+				for ( const text of versions.get( pathOnWiki( file ) ) || [] ) {
+					candidates.push( { text, from: 'the running page', byPatch: null } );
+				}
+
+				let found = null;
+				for ( const c of candidates ) {
+					const needle = trim( c.text );
+					const at = findOnce( body, needle );
+					if ( at !== -1 ) {
+						found = { ...c, text: needle, at };
+						break;
+					}
+				}
+				if ( !found ) {
+					// Not in this module, or the wiki runs a copy we do not have.
+					continue;
+				}
+
+				const decision = decideFile( file, found, `in ${ name }` );
+				if ( decision.text !== null ) {
+					const replacement = trim( decision.text );
+					body = body.slice( 0, found.at ) + replacement +
+						body.slice( found.at + found.text.length );
+					placements.push( { id, text: replacement, patchKey: patch.key } );
+				}
+				pending.push( { patch, file, status: decision.status, reason: decision.reason } );
+			}
+		}
+
+		if ( !pending.length ) {
+			return;
+		}
+		if ( placements.length ) {
+			const sourceUrl = `wikimedia-patched://module/${ name }`;
+			try {
+				data[ 1 ] = new Function( ...params, body + '\n//# sourceURL=' + sourceUrl + '\n' );
+			} catch ( e ) {
+				// Each file parsed alone, but the whole does not. Run nothing
+				// changed rather than something broken.
+				for ( const item of pending ) {
+					record( item.patch.key, item.file.path, STATUS.BASE_SKEW,
+						`Found in ${ name }, but the patched module is not valid JavaScript ` +
+						`(${ e.message }), so it was left unchanged.` );
+				}
+				return;
+			}
+			for ( const place of placements ) {
+				placed.set( place.id, { text: place.text, patchKey: place.patchKey } );
+			}
+			splicedScriptModules++;
+		}
+		for ( const item of pending ) {
+			record( item.patch.key, item.file.path, item.status, item.reason );
+		}
+	}
+
 	/**
 	 * Change a module payload before the page runs it.
 	 *
@@ -657,9 +822,12 @@
 		}
 
 		const script = data[ 1 ];
+		if ( typeof script === 'function' ) {
+			safely( spliceScriptsModule, mw, name, data );
+			return;
+		}
 		if ( !script || typeof script !== 'object' || !script.files ) {
-			// A scripts-only module is one blob. There is no way to tell
-			// which part came from which file.
+			// A string (site and user scripts) or something else unknown.
 			if ( script ) {
 				legacyModules.push( name );
 			}
@@ -671,13 +839,13 @@
 		// Replace first, so a new main file is in place before it is wrapped.
 		for ( const patch of payload.patches ) {
 			for ( const file of patch.replaceFiles || [] ) {
-				const hit = matchFileToModule( file.path, [ entry ] );
+				const hit = matchFileToModule( pathOnWiki( file ), [ entry ] );
 				if ( hit.status !== 'exact' && hit.status !== 'suffix' ) {
 					continue;
 				}
 				const key = hit.matches[ 0 ].key;
 				safely( replaceFileInPayload, mw, patch, file, script, key, name );
-				anchors.push( { repoPath: file.path, module: name, key } );
+				anchors.push( { repoPath: pathOnWiki( file ), module: name, key } );
 			}
 		}
 
@@ -688,7 +856,7 @@
 					continue;
 				}
 				const target = inferModuleForNewFile(
-					file.path, file.siblings || [], known, anchors
+					pathOnWiki( file ), file.siblings || [], known, anchors
 				);
 				if ( target.module !== name ) {
 					continue;
@@ -701,6 +869,18 @@
 				}
 			}
 		}
+	}
+
+	/**
+	 * The path ResourceLoader knows a patch file by. It differs from the
+	 * repository path for a submodule: VisualEditor's src/x.js is
+	 * lib/ve/src/x.js on the wiki.
+	 *
+	 * @param {Object} file
+	 * @return {string}
+	 */
+	function pathOnWiki( file ) {
+		return file.matchPath || file.path;
 	}
 
 	// ------------------------------------------------------- module bookkeeping
@@ -765,10 +945,10 @@
 		// Note which changed files this module holds. Phase 3 replaces them.
 		for ( const patch of payload.patches ) {
 			for ( const file of patch.replaceFiles || [] ) {
-				const hit = matchFileToModule( file.path, [ entry ] );
+				const hit = matchFileToModule( pathOnWiki( file ), [ entry ] );
 				if ( hit.status === 'exact' || hit.status === 'suffix' ) {
 					anchors.push( {
-						repoPath: file.path,
+						repoPath: pathOnWiki( file ),
 						module: hit.matches[ 0 ].module,
 						key: hit.matches[ 0 ].key
 					} );
@@ -798,7 +978,7 @@
 				continue;
 			}
 			const target = inferModuleForNewFile(
-				file.path, file.siblings || [], seenModules, anchors
+				pathOnWiki( file ), file.siblings || [], seenModules, anchors
 			);
 			if ( target.status === 'none' ) {
 				continue;
@@ -837,12 +1017,12 @@
 		}
 		for ( const patch of payload.patches ) {
 			for ( const file of patch.replaceFiles || [] ) {
-				const hit = matchFileToModule( file.path, seenModules );
+				const hit = matchFileToModule( pathOnWiki( file ), seenModules );
 				if ( hit.status === 'none' ) {
 					record( patch.key, file.path, STATUS.NOT_ON_PAGE,
 						'No module on this page holds this file.' + ( legacyModules.length ?
-							' Some modules here do not use packageFiles, and the ' +
-							'extension cannot see inside those.' : '' ) );
+							' Some modules here are served as one combined script, and the ' +
+							'extension can only look inside those in debug mode.' : '' ) );
 				} else if ( hit.status === 'ambiguous' ) {
 					record( patch.key, file.path, STATUS.AMBIGUOUS,
 						'Could be ' + hit.matches.map( ( m ) => m.module ).join( ' or ' ) + '.' );

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { optionalPatternFor } from '../shared/constants.js';
 import {
+	mountFor, installedPath,
 	classifyProject, deployBranch, projectForSkin, modulePrefixesForProject,
 	lessSearchDirs, mapLessPrefix, normalisePath, CORE_PROJECT
 } from '../shared/mw-layout.js';
@@ -101,4 +102,19 @@ test( 'an origin maps to the wildcard the manifest declares', () => {
 	assert.equal( optionalPatternFor( 'https://www.mediawiki.org' ),
 		'https://*.mediawiki.org/*' );
 	assert.equal( optionalPatternFor( 'https://example.test' ), null );
+} );
+
+test( 'the VisualEditor library maps into the extension that carries it', () => {
+	// Checked against mediawiki/extensions/VisualEditor/.gitmodules.
+	assert.equal( mountFor( 'VisualEditor/VisualEditor' ).path, 'lib/ve' );
+	assert.equal( installedPath( 'VisualEditor/VisualEditor', 'src/dm/ve.dm.LinearData.js' ),
+		'lib/ve/src/dm/ve.dm.LinearData.js' );
+	assert.equal( installedPath( 'mediawiki/extensions/VisualEditor', 'editcheck/x.js' ),
+		'editcheck/x.js', 'a normal repository keeps its paths' );
+	assert.deepEqual( classifyProject( 'VisualEditor/VisualEditor' ), {
+		type: 'submodule', name: 'VisualEditor',
+		installPath: 'extensions/VisualEditor/lib/ve'
+	} );
+	assert.deepEqual( modulePrefixesForProject( 'VisualEditor/VisualEditor' ),
+		modulePrefixesForProject( 'mediawiki/extensions/VisualEditor' ) );
 } );

@@ -11,7 +11,7 @@ import {
 import {
 	KIND, classifyPath, isClientSide, diffMessages, diffManifest
 } from './patch-model.js';
-import { modulePrefixesForProject } from '../shared/mw-layout.js';
+import { modulePrefixesForProject, mountFor, installedPath } from '../shared/mw-layout.js';
 import { listDirectory } from './gitiles.js';
 import { isPlainCss } from '../shared/less-compile.js';
 import { STATUS } from '../shared/constants.js';
@@ -51,9 +51,21 @@ export async function preparePatch( ref ) {
 		notes: []
 	};
 
+	const mount = mountFor( change.project );
+	payload.mount = mount ? { project: mount.project, path: mount.path } : null;
+
 	// Read every file in parallel. Gerrit is fine with this and a change is small.
 	const jobs = Object.entries( files ).map( async ( [ path, info ] ) => {
 		const kind = classifyPath( path );
+
+		// A file in a submodule that the server reads, such as the list of
+		// files VisualEditor builds its modules from.
+		if ( mount && mount.serverFiles[ path ] ) {
+			payload.skipped.push( {
+				path, kind, status: STATUS.SERVER_SIDE, reason: mount.serverFiles[ path ]
+			} );
+			return;
+		}
 		const isNew = info.status === 'A';
 		const isDeleted = info.status === 'D';
 
@@ -108,8 +120,11 @@ export async function preparePatch( ref ) {
 			return;
 		}
 
-		// JS and JSON data files go into the module payload.
-		const entry = { path, kind, source, parentSource };
+		// JS and JSON data files go into the module payload. matchPath is the
+		// name ResourceLoader uses, which differs for a submodule.
+		const entry = {
+			path, matchPath: installedPath( change.project, path ), kind, source, parentSource
+		};
 		if ( isNew ) {
 			payload.newFiles.push( entry );
 		} else {

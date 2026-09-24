@@ -445,7 +445,7 @@ test( 'replacing the main file and adding a file work together', async () => {
 	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'new init', 'extra' ] );
 } );
 
-test( 'a scripts-only module is left alone and reported', async () => {
+test( 'a combined script is left alone without debug mode, and says why', async () => {
 	const { page, reports } = await startPage( patchWith( {
 		replaceFiles: [ {
 			path: 'resources/src/legacy/thing.js',
@@ -454,7 +454,7 @@ test( 'a scripts-only module is left alone and reported', async () => {
 			source: 'patched();'
 		} ]
 	} ) );
-	bootMediaWiki( page );
+	bootMediaWiki( page, { debug: false } );
 	page.runScript( 'mw.editcheck = { log: [] };' );
 	page.runScript(
 		'mw.loader.impl( function () { return [ "legacy.module@", ' +
@@ -470,7 +470,7 @@ test( 'a scripts-only module is left alone and reported', async () => {
 	const row = reports.flatMap( ( r ) => r.files )
 		.find( ( f ) => f.path === 'resources/src/legacy/thing.js' );
 	assert.equal( row.status, 'not-on-page' );
-	assert.match( row.reason, /do not use packageFiles/ );
+	assert.match( row.reason, /one combined script.*debug mode/ );
 } );
 
 // ------------------------------------------------------------ skin styles
@@ -879,4 +879,133 @@ test( 'two patches that disagree keep the first and flag the second', async () =
 	assert.equal( b.status, 'conflict' );
 	assert.match( b.reason, /Kept A's version/ );
 	assert.equal( rows.find( ( r ) => r.patchKey === 'A' ).status, 'applied' );
+} );
+
+// ----------------------------------------------------------------- splice
+
+/**
+ * A file of the VisualEditor library, long enough to be found by its text.
+ * Each one logs its own name, so a test sees exactly which copy ran.
+ */
+function veFile( name, variant = '' ) {
+	return `/*!\n * ${ name }: ` + 'padding so the text is long enough to find. '.repeat( 6 ) +
+		`\n */\nmw.editcheck.log.push( '${ name }${ variant }' );\n` +
+		`ve.${ name } = function () {};\nve.${ name }.prototype.size = 1;\n`;
+}
+
+/** Serve a scripts module the way ResourceLoader does in debug mode. */
+function scriptsPayload( name, files ) {
+	return `mw.loader.impl(function(){return[${ JSON.stringify( name + '@' ) },` +
+		`function($,jQuery,require,module){${ files.join( '\n' ) }\n}];});`;
+}
+
+function vePatch( key, { parent, source, deployed, prefixes = [ 'ext.visualEditor' ] } ) {
+	return {
+		key, changeNumber: key, patchset: 1, project: 'VisualEditor/VisualEditor',
+		modulePrefixes: prefixes,
+		messages: {}, styles: [], newFiles: [], skipped: [], notes: [],
+		replaceFiles: [ {
+			path: 'src/dm/ve.dm.LinearData.js',
+			matchPath: 'lib/ve/src/dm/ve.dm.LinearData.js',
+			kind: 'js', parentSource: parent, source,
+			...( deployed ? { deployed: { ref: 'wmf/1.47.0-wmf.20', source: deployed } } : {} )
+		} ]
+	};
+}
+
+async function runVeCore( patches, { files, debug = true, module = 'ext.visualEditor.core' } = {} ) {
+	const { page, reports } = await startPage(
+		{ active: true, reason: null, siteKind: 'dev', elevatedAck: false, patches } );
+	bootMediaWiki( page, { debug } );
+	page.runScript( 'mw.editcheck = { log: [] }; window.ve = {};' );
+	page.runScript( scriptsPayload( module,
+		files || [ veFile( 'Surface' ), veFile( 'LinearData' ), veFile( 'Node' ) ] ) );
+	await page.window.mw.loader.using( module );
+	await page.flush( 100 );
+	return { page, reports, log: () => [ ...page.runScript( 'mw.editcheck.log' ) ] };
+}
+
+const LINEAR_ROW = ( reports ) => reports.at( -1 ).files
+	.find( ( f ) => f.path === 'src/dm/ve.dm.LinearData.js' );
+
+test( 'a library file is swapped inside a combined script', async () => {
+	const { log, reports } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ), source: veFile( 'LinearData', '-patched' )
+	} ) ] );
+	assert.deepEqual( log(), [ 'Surface', 'LinearData-patched', 'Node' ],
+		'only the patched file changed, and its neighbours still ran' );
+	const row = LINEAR_ROW( reports );
+	assert.equal( row.status, 'applied' );
+	assert.match( row.reason, /runs the patch base/ );
+} );
+
+test( 'a skewed library file is merged inside a combined script', async () => {
+	// The wiki's branch has an older copy; the patch base is newer.
+	const wiki = veFile( 'LinearData' ).replace( 'size = 1', 'size = 0' );
+	const { log, page, reports } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ),
+		source: veFile( 'LinearData', '-patched' ),
+		deployed: wiki
+	} ) ], { files: [ veFile( 'Surface' ), wiki, veFile( 'Node' ) ] } );
+
+	assert.deepEqual( log(), [ 'Surface', 'LinearData-patched', 'Node' ] );
+	assert.equal( page.runScript( 'new ve.LinearData().size' ), 0,
+		"the wiki's own line stays; only the patch's change is added" );
+	assert.equal( LINEAR_ROW( reports ).status, 'merged' );
+} );
+
+test( 'a library file the wiki runs in some other version is reported', async () => {
+	const other = veFile( 'LinearData' ).replace( 'padding', 'PADDING' );
+	const { log, page, reports } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ), source: veFile( 'LinearData', '-patched' )
+	} ) ], { files: [ veFile( 'Surface' ), other, veFile( 'Node' ) ] } );
+	assert.deepEqual( log(), [ 'Surface', 'LinearData', 'Node' ], 'nothing was guessed' );
+	page.runScript( 'window.dispatchEvent( { type: "load" } );' );
+	await page.flush( 1700 );
+	assert.equal( LINEAR_ROW( reports ).status, 'not-on-page' );
+} );
+
+test( 'a combined script is not touched without debug mode', async () => {
+	const { log } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ), source: veFile( 'LinearData', '-patched' )
+	} ) ], { debug: false } );
+	assert.deepEqual( log(), [ 'Surface', 'LinearData', 'Node' ] );
+} );
+
+test( 'a module outside the patch repository is not searched', async () => {
+	const { log } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ), source: veFile( 'LinearData', '-patched' )
+	} ) ], { module: 'ext.somethingElse' } );
+	assert.deepEqual( log(), [ 'Surface', 'LinearData', 'Node' ] );
+} );
+
+for ( const order of [ 'AB', 'BA' ] ) {
+	test( `two library patches on one file stack inside a combined script (${ order })`,
+		async () => {
+			const base = veFile( 'LinearData' );
+			const a = base.replace( 'size = 1', 'size = 2' );
+			const b = a.replace( "'LinearData'", "'LinearData-B'" );
+			const pa = vePatch( 'A', { parent: base, source: a } );
+			const pb = vePatch( 'B', { parent: a, source: b } );
+			const { log, page, reports } = await runVeCore( order === 'AB' ? [ pa, pb ] : [ pb, pa ] );
+			assert.deepEqual( log(), [ 'Surface', 'LinearData-B', 'Node' ] );
+			assert.equal( page.runScript( 'new ve.LinearData().size' ), 2 );
+			const rows = reports.at( -1 ).files;
+			assert.deepEqual( [ ...rows.map( ( r ) => r.patchKey ) ].sort(), [ 'A', 'B' ],
+				'both patches report on the file' );
+		} );
+}
+
+test( 'a splice that breaks the combined script is not run', async () => {
+	// Fine alone, but the combined script is one function scope, and
+	// Surface already declares this name.
+	const surface = veFile( 'Surface' ) + 'const shared = 1;\n';
+	const patched = veFile( 'LinearData', '-patched' ) + 'const shared = 2;\n';
+	const { log, reports } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ), source: patched
+	} ) ], { files: [ surface, veFile( 'LinearData' ), veFile( 'Node' ) ] } );
+	assert.deepEqual( log(), [ 'Surface', 'LinearData', 'Node' ], 'the module ran unchanged' );
+	const row = LINEAR_ROW( reports );
+	assert.equal( row.status, 'base-skew' );
+	assert.match( row.reason, /not valid JavaScript/ );
 } );
