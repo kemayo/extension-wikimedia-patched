@@ -3,20 +3,15 @@
  *
  * The compiler is bundled at build time, from node_modules. The extension
  * never fetches a compiler: it is code, and code must ship in the package.
+ *
+ * The import is static on purpose. Chrome forbids import() in a service
+ * worker, and an earlier version used it: the import threw, the catch
+ * read that as "no compiler", and every stylesheet was skipped. The build
+ * always writes vendor/less.js, as the compiler or as a stub that exports
+ * null, so this import always resolves.
  */
 
-let compiler;
-
-async function getCompiler() {
-	if ( compiler === undefined ) {
-		try {
-			compiler = ( await import( '../vendor/less.js' ) ).default;
-		} catch ( e ) {
-			compiler = null;
-		}
-	}
-	return compiler;
-}
+import less from '../vendor/less.js';
 
 /**
  * Compile a flattened stylesheet.
@@ -29,12 +24,19 @@ async function getCompiler() {
  * @return {Promise<{ ok: boolean, css: string|null, reason: string|null }>}
  */
 export async function compileLess( source, options = {} ) {
-	const less = await getCompiler();
-	if ( !less || typeof less.render !== 'function' ) {
+	if ( !less ) {
 		return {
 			ok: false,
 			css: null,
 			reason: 'No LESS compiler is bundled. Run `npm install less` and build again.'
+		};
+	}
+	if ( typeof less.render !== 'function' ) {
+		// Bundled, but not in the shape expected. Say so, not "missing".
+		return {
+			ok: false,
+			css: null,
+			reason: 'The bundled LESS compiler has no render(). Check vendor/less.js.'
 		};
 	}
 	try {

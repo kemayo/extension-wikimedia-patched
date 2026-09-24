@@ -7,9 +7,9 @@
 	"scripts": {
 		"build": "node build.mjs",
 		"test": "npm run build && node --test \"test/*.test.js\"",
-		"smoke": "node scripts/gerrit-smoke.mjs",
-		"smoke:less": "node scripts/less-smoke.mjs",
-		"smoke:skew": "node scripts/skew-smoke.mjs"
+		"smoke": "npm run build >/dev/null && node scripts/gerrit-smoke.mjs",
+		"smoke:less": "npm run build >/dev/null && node scripts/less-smoke.mjs",
+		"smoke:skew": "npm run build >/dev/null && node scripts/skew-smoke.mjs"
 	},
 	"dependencies": {
 		"less": "^4.9.1"
