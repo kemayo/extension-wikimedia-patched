@@ -144,6 +144,7 @@
 					reason: payload ? payload.reason : 'no-answer',
 					// Lets the worker fetch this wiki's branch for next time.
 					version: wikiVersion(),
+					held: heldStats,
 					ranAt: Date.now()
 				}
 			} ) );
@@ -663,6 +664,10 @@
 	const insertedNewFiles = new Set();
 	/** Modules that do not use packageFiles, so the extension cannot see inside. */
 	const legacyModules = [];
+	/** Module payloads that arrived before the patch data, in arrival order. */
+	const held = [];
+	/** How long the page waited, for the report. */
+	let heldStats = null;
 
 	function moduleEntry( name, script ) {
 		const files = script && typeof script === 'object' && script.files ?
@@ -794,8 +799,8 @@
 					// The module arrived before the extension was ready, so
 					// its payload could not be changed.
 					record( patch.key, file.path, STATUS.TIMED_OUT,
-						`Found in ${ hit.matches[ 0 ].module }, but that module loaded ` +
-						'before the extension was ready. Reload the page.' );
+						`Found in ${ hit.matches[ 0 ].module }, but that module ran ` +
+						'before the patch data arrived. Reload the page.' );
 				}
 			}
 			for ( const skipped of patch.skipped || [] ) {
@@ -856,38 +861,95 @@
 			return;
 		}
 
+		/**
+		 * Run one module through the patch, then hand it to ResourceLoader.
+		 *
+		 * @param {Object} self The `this` impl was called with.
+		 * @param {string} name
+		 * @param {Array} data
+		 * @return {*}
+		 */
+		function implNow( self, name, data ) {
+			safely( rewriteModulePayload, mw, name, data );
+			// A throw from here is the page's own: the payload is either
+			// unchanged or was checked when it was compiled.
+			const result = originalImpl.call( self, () => data );
+			if ( !BASE_MODULES.includes( name ) ) {
+				safely( onModule, mw, name, data );
+			}
+			return result;
+		}
+
+		/**
+		 * Say whether a module may wait for the patch data.
+		 *
+		 * Only the answer to a loader request may wait. work() marks each
+		 * module it fetches as "loading" before it sends the request, and
+		 * the request's script has no callback, so a late impl looks the
+		 * same as a slow network. Nothing else is safe to hold:
+		 * - an inline impl in the page HTML, such as user.options, is
+		 *   followed at once by code that expects it to be there;
+		 * - an only=scripts response sets the module to "ready" straight
+		 *   after its impl;
+		 * - the base modules hold up everything, this script included.
+		 *
+		 * @param {string} name
+		 * @return {boolean}
+		 */
+		function mayWait( name ) {
+			if ( BASE_MODULES.includes( name ) ) {
+				return false;
+			}
+			const entry = loader.moduleRegistry && loader.moduleRegistry[ name ];
+			return !!entry && entry.state === 'loading';
+		}
+
 		loader.impl = function ( declarator ) {
 			// Anything that throws here loses every later module in the same
 			// response, so the original call is always the fallback.
 			let data;
-			try {
-				data = declarator();
-			} catch ( e ) {
-				return originalImpl.apply( this, arguments );
-			}
-
 			let name;
 			try {
+				data = declarator();
 				name = String( data[ 0 ] ).split( '@' )[ 0 ];
 			} catch ( e ) {
 				return originalImpl.apply( this, arguments );
 			}
 
-			safely( rewriteModulePayload, mw, name, data );
-
-			let result;
-			try {
-				result = originalImpl.call( this, () => data );
-			} catch ( e ) {
-				// The payload is unchanged, so a failure is the page's own.
-				throw e;
+			if ( !payloadSettled && mayWait( name ) ) {
+				held.push( { self: this, name, data, at: Date.now() } );
+				return undefined;
 			}
-
-			if ( !BASE_MODULES.includes( name ) ) {
-				safely( onModule, mw, name, data );
-			}
-			return result;
+			return implNow( this, name, data );
 		};
+
+		// Once the patch data is in, or the wait has timed out, release the
+		// held modules in the order they arrived.
+		onPayload( () => {
+			const released = held.splice( 0 );
+			for ( const item of released ) {
+				const entry = loader.moduleRegistry[ item.name ];
+				if ( entry && entry.script !== undefined ) {
+					// Something else implemented it meanwhile. A second impl
+					// would throw "module already implemented".
+					continue;
+				}
+				try {
+					implNow( item.self, item.name, item.data );
+				} catch ( e ) {
+					// One bad module must not strand the rest.
+					safely( () => {
+						throw e;
+					} );
+				}
+			}
+			if ( released.length ) {
+				heldStats = {
+					count: released.length,
+					longestMs: Math.max( ...released.map( ( r ) => Date.now() - r.at ) )
+				};
+			}
+		} );
 	}
 
 	function onMw( mw ) {
@@ -946,7 +1008,9 @@
 		}
 		// eslint-disable-next-line no-console
 		console.info( tag, `${ payload.patches.length } patch(es)`, counts,
-			`${ seenModules.length } modules seen`, results );
+			`${ seenModules.length } modules seen`,
+			heldStats ? `${ heldStats.count } held for up to ${ heldStats.longestMs }ms` : '',
+			results );
 	}
 
 	function finish() {

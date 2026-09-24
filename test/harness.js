@@ -199,9 +199,28 @@ export function bootMediaWiki( page, { debug = true } = {} ) {
 				};
 			}
 
+			// Resolves using() calls made before the module arrived.
+			var waiters = {};
+
 			mw.loader = {
 				moduleRegistry: registry,
 				maxQueryLength: WMP_DEBUG ? 0 : 5000,
+				// Names in the order impl really ran, for tests.
+				_implOrder: [],
+				register: function ( name ) {
+					registry[ name ] = {
+						state: 'registered', script: undefined,
+						packageExports: {}, module: { exports: {} }
+					};
+				},
+				// Stands in for work(): it marks a module "loading" before it
+				// sends the request, which is what lets a response wait.
+				_request: function ( name ) {
+					if ( !registry[ name ] ) {
+						mw.loader.register( name );
+					}
+					registry[ name ].state = 'loading';
+				},
 				impl: function ( declarator ) {
 					var data = declarator();
 					var parts = String( data[ 0 ] ).split( '@' );
@@ -209,11 +228,23 @@ export function bootMediaWiki( page, { debug = true } = {} ) {
 					if ( registry[ name ] && registry[ name ].script !== undefined ) {
 						throw new Error( 'module already implemented: ' + name );
 					}
-					registry[ name ] = {
-						version: parts[ 1 ], script: data[ 1 ], style: data[ 2 ],
-						messages: data[ 3 ], packageExports: {},
-						module: { exports: {} }, state: 'loaded'
-					};
+					if ( data[ 1 ] === '__throw__' ) {
+						throw new Error( 'bad module: ' + name );
+					}
+					mw.loader._implOrder.push( name );
+					// Core fills in the existing registry entry.
+					var entry = registry[ name ] || ( registry[ name ] = {
+						packageExports: {}, module: { exports: {} }
+					} );
+					entry.version = parts[ 1 ];
+					entry.script = data[ 1 ];
+					entry.style = data[ 2 ];
+					entry.messages = data[ 3 ];
+					entry.state = 'loaded';
+					( waiters[ name ] || [] ).forEach( function ( fn ) {
+						fn();
+					} );
+					delete waiters[ name ];
 				},
 				// Real load.php responses end by setting the state of the
 				// modules they carry, or of ones they could not find.
@@ -235,7 +266,12 @@ export function bootMediaWiki( page, { debug = true } = {} ) {
 					return registry[ name ].module.exports;
 				},
 				using: function ( name ) {
-					return Promise.resolve().then( function () {
+					var arrived = registry[ name ] && registry[ name ].script !== undefined ?
+						Promise.resolve() :
+						new Promise( function ( resolve ) {
+							( waiters[ name ] = waiters[ name ] || [] ).push( resolve );
+						} );
+					return arrived.then( function () {
 						var entry = registry[ name ];
 						if ( !entry ) { throw new Error( 'Unknown module: ' + name ); }
 						if ( entry.state === 'ready' ) { return entry.module.exports; }

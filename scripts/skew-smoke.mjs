@@ -24,12 +24,15 @@ const siteinfo = await ( await fetch(
 ) ).json();
 const version = siteinfo.query.general.generator.replace( /^MediaWiki /, '' );
 
-const loadUrl = `${ wiki }/w/load.php?modules=${ module }&debug=2&only=scripts&skin=vector-2022`;
+// The request the loader itself makes: no only=scripts. An only=scripts
+// response ends by setting the module to "ready", which the loader's own
+// responses never do.
+const loadUrl = `${ wiki }/w/load.php?lang=en&modules=${ module }&skin=vector-2022&debug=2`;
 const moduleText = await ( await fetch( loadUrl ) ).text();
 
 const prepared = await preparePatch( parsePatchRef( change ) );
 
-async function run( label, patch, debug ) {
+async function run( label, patch, debug, { late = false } = {} ) {
 	const page = createPage();
 	page.runFile( 'dist/chrome/content/main-world.js' );
 	const channel = page.document.documentElement.dataset.wmpChannel;
@@ -38,10 +41,22 @@ async function run( label, patch, debug ) {
 	const payload = {
 		active: true, reason: null, siteKind: 'prod', elevatedAck: true, patches: [ patch ]
 	};
-	page.runScript( `document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':in' ) },` +
+	const answer = () => page.runScript(
+		`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':in' ) },` +
 		` { detail: ${ JSON.stringify( payload ) } } ) );` );
+	if ( !late ) {
+		answer();
+	}
 	bootMediaWiki( page, { debug } );
+	// As work() does, mark the module as requested before its response runs.
+	page.runScript( `mw.loader._request( ${ JSON.stringify( module ) } );` );
 	page.runScript( moduleText, loadUrl );
+	if ( late ) {
+		const state = page.window.mw.loader.moduleRegistry[ module ].state;
+		console.log( `\n(module arrived first; its state while waiting: ${ state })` );
+		await page.flush( 300 );
+		answer();
+	}
 	await page.flush( 150 );
 
 	console.log( `\n== ${ label } ==` );
@@ -54,3 +69,4 @@ console.log( `${ wiki } runs ${ version }; ${ module } is ${ moduleText.length }
 await run( 'debug mode: merge against the running page', prepared, true );
 await run( 'no debug mode: merge against the deployed branch',
 	await withDeployed( prepared, version ), false );
+await run( 'module arrives 300ms before the patch data', prepared, true, { late: true } );

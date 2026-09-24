@@ -711,3 +711,108 @@ test( 'a clean merge that is not valid code is never run', async () => {
 	assert.equal( row.status, 'base-skew' );
 	assert.match( row.reason, /not valid JavaScript/ );
 } );
+
+// ---------------------------------------------------------------- holding
+
+/**
+ * Start a page whose bridge has not answered yet, and make a module
+ * arrive the way a loader request does: marked "loading" first.
+ */
+async function pageWithSlowBridge() {
+	const { page, reports, channel } = await startPage( null );
+	bootMediaWiki( page );
+	page.runScript( 'mw.editcheck = { log: [], registered: [] };' );
+	const answer = ( payload ) => page.runScript(
+		`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':in' ) }, ` +
+		`{ detail: ${ JSON.stringify( payload ) } } ) );` );
+	const respond = ( name, files ) => {
+		page.runScript( `mw.loader._request( ${ JSON.stringify( name ) } );` );
+		page.runScript( modulePayload( name, 'editcheck/modules/init.js', files ) );
+	};
+	return { page, reports, answer, respond };
+}
+
+const CONTROLLER_FILES = {
+	'editcheck/modules/controller.js': OLD_CONTROLLER,
+	'editcheck/modules/init.js': OLD_INIT
+};
+const CONTROLLER_PATCH = patchWith( {
+	replaceFiles: [ {
+		path: 'editcheck/modules/controller.js',
+		kind: 'js',
+		parentSource: OLD_CONTROLLER,
+		source: "mw.editcheck.log.push( 'controller v2' );"
+	} ]
+} );
+
+test( 'a requested module that arrives early waits for the patch', async () => {
+	const { page, reports, answer, respond } = await pageWithSlowBridge();
+	respond( 'ext.visualEditor.editCheck', CONTROLLER_FILES );
+
+	// Still "loading": ResourceLoader has not seen the payload yet.
+	const entry = () => page.window.mw.loader.moduleRegistry[ 'ext.visualEditor.editCheck' ];
+	assert.equal( entry().state, 'loading' );
+	assert.equal( entry().script, undefined );
+
+	const done = page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	answer( CONTROLLER_PATCH );
+	await done;
+	await page.flush( 100 );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ],
+		'the patched file ran, even though the module came first' );
+	assert.equal( rowFor( reports, 'editcheck/modules/controller.js' ).status, 'applied' );
+	assert.equal( reports.at( -1 ).held.count, 1 );
+} );
+
+test( 'an inline module never waits', async () => {
+	// user.options is delivered in the page HTML, and the code after it
+	// expects it at once. It is "registered", never "loading".
+	const { page } = await pageWithSlowBridge();
+	page.runScript( 'mw.loader.register( "user.options" );' );
+	page.runScript( modulePayload( 'user.options', 'init.js', {
+		'init.js': "mw.editcheck.log.push( 'options' );"
+	} ) );
+	assert.equal( page.window.mw.loader.moduleRegistry[ 'user.options' ].state, 'loaded' );
+} );
+
+test( 'a base module never waits', async () => {
+	const { page } = await pageWithSlowBridge();
+	page.runScript( 'mw.loader._request( "mediawiki.base" );' );
+	page.runScript( modulePayload( 'mediawiki.base', 'init.js', { 'init.js': '' } ) );
+	assert.equal( page.window.mw.loader.moduleRegistry[ 'mediawiki.base' ].state, 'loaded',
+		'everything waits on the base modules, so they must not wait' );
+} );
+
+test( 'held modules are released in the order they arrived', async () => {
+	const { page, answer, respond } = await pageWithSlowBridge();
+	for ( const name of [ 'ext.a', 'ext.b', 'ext.c' ] ) {
+		respond( name, { 'editcheck/modules/init.js': '' } );
+	}
+	assert.deepEqual( [ ...page.window.mw.loader._implOrder ], [],
+		'nothing reaches ResourceLoader before the patch data' );
+	answer( patchWith( {} ) );
+	assert.deepEqual( [ ...page.window.mw.loader._implOrder ],
+		[ 'ext.a', 'ext.b', 'ext.c' ] );
+} );
+
+test( 'one bad held module does not strand the others', async () => {
+	const { page, answer } = await pageWithSlowBridge();
+	page.runScript( 'mw.loader._request( "ext.bad" ); mw.loader._request( "ext.good" );' );
+	page.runScript( 'mw.loader.impl( function () { return [ "ext.bad@", "__throw__" ]; } );' );
+	page.runScript( modulePayload( 'ext.good', 'init.js', {
+		'init.js': "mw.editcheck.log.push( 'good' );"
+	} ) );
+	answer( patchWith( {} ) );
+	await page.window.mw.loader.using( 'ext.good' );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'good' ] );
+} );
+
+test( 'a bridge that never answers releases the modules unpatched', async () => {
+	const { page, respond } = await pageWithSlowBridge();
+	respond( 'ext.visualEditor.editCheck', CONTROLLER_FILES );
+	// No answer. After the timeout the page carries on without patches.
+	await page.flush( 2100 );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v1' ] );
+} );

@@ -122,6 +122,30 @@ module. It hooks `window.mw`, then `mw.loader`, then wraps `mw.loader.impl`.
 The wrapper calls the declarator, swaps whole files in the returned data, and
 re-wraps it. Nothing in ResourceLoader checks module content, so this works.
 
+### When a module arrives before the patch data
+
+The patch data comes from the background worker, which may be asleep or
+still reading Gerrit when the page's first modules arrive. A module that
+runs before the data is in cannot be patched afterwards: running it again
+would repeat every side effect.
+
+So the wrapper holds a module's payload until the data arrives, then
+releases them in arrival order. Holding is only safe for the answer to a
+request the loader made itself. `work()` marks each module it fetches as
+`loading` before it sends the request, and that request has no completion
+callback, so a held payload looks the same as a slow network. Nothing else
+may wait:
+
+- An `impl` inline in the page HTML, such as `user.options`, is followed at
+  once by code that expects it. It is `registered`, never `loading`.
+- An `only=scripts` response sets its module to `ready` straight after the
+  `impl`.
+- The base modules hold up everything, this script included.
+
+If the data has not arrived after two seconds, the modules are released
+unpatched and the popup says so. The report and the console say how many
+modules waited and for how long.
+
 ## When the wiki runs a different base
 
 A patch is written against master. A wiki runs a wmf branch cut some days
