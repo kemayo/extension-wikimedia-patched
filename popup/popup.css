@@ -98,3 +98,15 @@ footer a { color: var( --accent ); font-size: 11px; }
 
 .danger-inline p { margin: 0 0 6px; color: var( --bad ); }
 .danger-inline button { cursor: pointer; }
+
+.site-status {
+	border: 1px solid var( --warn );
+	border-radius: 2px;
+	padding: 8px;
+	margin: 8px 0;
+}
+
+.site-status p { margin: 0; color: var( --warn ); }
+.site-status button { margin-top: 6px; cursor: pointer; }
+.site-status.ok { border-color: var( --good ); }
+.site-status.ok p { color: var( --good ); }

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { optionalPatternFor } from '../shared/constants.js';
 import {
 	classifyProject, deployBranch, projectForSkin, modulePrefixesForProject,
 	lessSearchDirs, mapLessPrefix, normalisePath, CORE_PROJECT
@@ -89,4 +90,15 @@ test( 'normalisePath collapses dot segments', () => {
 	assert.equal( normalisePath( 'a/b/../c.less' ), 'a/c.less' );
 	assert.equal( normalisePath( 'a/./b.less' ), 'a/b.less' );
 	assert.equal( normalisePath( './x.less' ), 'x.less' );
+} );
+
+test( 'an origin maps to the wildcard the manifest declares', () => {
+	// A permission request must name a declared pattern, not a bare origin.
+	assert.equal( optionalPatternFor( 'https://en.wikipedia.org' ),
+		'https://*.wikipedia.org/*' );
+	assert.equal( optionalPatternFor( 'https://commons.wikimedia.org' ),
+		'https://*.wikimedia.org/*' );
+	assert.equal( optionalPatternFor( 'https://www.mediawiki.org' ),
+		'https://*.mediawiki.org/*' );
+	assert.equal( optionalPatternFor( 'https://example.test' ), null );
 } );

@@ -3,7 +3,7 @@
  */
 
 import { ext } from '../shared/webext.js';
-import { MSG, STATUS, GERRIT_BASE } from '../shared/constants.js';
+import { MSG, STATUS, GERRIT_BASE, optionalPatternFor } from '../shared/constants.js';
 
 const el = ( id ) => document.getElementById( id );
 
@@ -21,7 +21,8 @@ const STATUS_LABEL = {
 	[ STATUS.CONFLICT ]: [ 'conflict', 's-bad' ],
 	[ STATUS.TIMED_OUT ]: [ 'timed out', 's-bad' ],
 	[ STATUS.BLOCKED_PAGE ]: [ 'blocked here', 's-bad' ],
-	[ STATUS.BLOCKED_ELEVATED ]: [ 'needs confirming', 's-bad' ]
+	[ STATUS.BLOCKED_ELEVATED ]: [ 'needs confirming', 's-bad' ],
+	[ STATUS.PENDING ]: [ 'no word yet', 's-skip' ]
 };
 
 async function send( type, extra = {} ) {
@@ -32,14 +33,77 @@ async function send( type, extra = {} ) {
 	return reply.result;
 }
 
-/** The report from the page, if the content script sent one. */
-async function currentTabReport() {
+/** What the worker and the page each say about the current tab. */
+async function currentTab() {
 	const [ tab ] = await ext.tabs.query( { active: true, currentWindow: true } );
 	if ( !tab ) {
-		return { tab: null, report: null };
+		return { tab: null, report: null, diagnosis: null };
 	}
-	const { report } = await send( MSG.GET_TAB_STATUS, { tabId: tab.id } );
-	return { tab, report };
+	const { diagnosis } = await send( MSG.GET_DIAGNOSIS, { tabId: tab.id } );
+	return { tab, report: diagnosis && diagnosis.report, diagnosis };
+}
+
+/**
+ * Explain the current tab in one line, and offer the fix.
+ *
+ * A patch that does nothing is the common complaint, and the cause is
+ * almost never the patch. It is the switch, the site, or a page that
+ * loaded before the extension was ready.
+ *
+ * @param {Object|null} tab
+ * @param {Object|null} d Diagnosis from the worker.
+ */
+function renderSiteStatus( tab, d ) {
+	const box = el( 'site-status' );
+	const text = el( 'site-status-text' );
+	const allow = el( 'site-allow' );
+	allow.hidden = true;
+	box.classList.remove( 'ok' );
+
+	if ( !d || d.reason === 'no-tab' ) {
+		box.hidden = true;
+		return;
+	}
+	box.hidden = false;
+
+	if ( !d.siteKind ) {
+		text.textContent = `${ d.origin || d.url || 'This page' } is not a wiki ` +
+			'the extension knows.';
+		return;
+	}
+	if ( !d.hasPermission ) {
+		text.textContent = `The extension has no permission for ${ d.origin }.`;
+		allow.hidden = false;
+		allow.dataset.origin = d.origin;
+		return;
+	}
+	if ( !d.enabled ) {
+		text.textContent = 'The switch is off.';
+		return;
+	}
+	if ( !d.acknowledged ) {
+		text.textContent = `${ d.origin } is a production wiki. A patch runs with ` +
+			'your account, so it needs your say-so for this browser session.';
+		allow.hidden = false;
+		allow.dataset.origin = d.origin;
+		return;
+	}
+	if ( !d.patchCount ) {
+		text.textContent = 'No patches added yet.';
+		return;
+	}
+	if ( !d.readyPatchCount ) {
+		text.textContent = 'No patch is both reviewed and switched on.';
+		return;
+	}
+	if ( !d.report ) {
+		text.textContent = 'The page has not answered. Reload the tab, and check ' +
+			'that it finished loading.';
+		return;
+	}
+	box.classList.add( 'ok' );
+	text.textContent = d.report.siteNote ||
+		`${ d.readyPatchCount } patch(es) active on this page.`;
 }
 
 function renderFileRows( tbody, rows, patch ) {
@@ -96,14 +160,20 @@ function fileRowsFor( payload, report ) {
 		rows.push( live || { path, status: fallbackStatus, reason } );
 	};
 
+	// Only the page can say what happened to a file. Until it does, say
+	// nothing rather than something wrong.
+	const unheard = 'The page has not reported on this file.';
 	for ( const f of payload.replaceFiles ) {
-		add( f.path, STATUS.NOT_ON_PAGE, 'No page loaded this file yet.' );
+		add( f.path, STATUS.PENDING, unheard );
 	}
 	for ( const f of payload.newFiles ) {
-		add( f.path, STATUS.NOT_ON_PAGE, 'No page loaded the owning module yet.' );
+		add( f.path, STATUS.PENDING, unheard );
 	}
 	for ( const s of payload.styles ) {
-		add( s.path, STATUS.NOT_ON_PAGE, 'Not injected on this page yet.' );
+		add( s.path, STATUS.PENDING, unheard );
+	}
+	for ( const s of payload.pendingStyles || [] ) {
+		add( s.path, STATUS.PENDING, unheard );
 	}
 	for ( const s of payload.skipped ) {
 		rows.push( { path: s.path, status: s.status, reason: s.reason } );
@@ -113,7 +183,7 @@ function fileRowsFor( payload, report ) {
 		const live = fromPage.get( '(messages)' );
 		rows.push( live || {
 			path: '(messages)',
-			status: STATUS.NOT_ON_PAGE,
+			status: STATUS.PENDING,
 			reason: `${ count } English message(s) ready.`
 		} );
 	}
@@ -161,9 +231,11 @@ function renderPatch( patch, payload, report ) {
 }
 
 async function render() {
-	const [ state, { report } ] = await Promise.all( [
-		send( MSG.GET_STATE ), currentTabReport()
+	const [ state, { tab, report, diagnosis } ] = await Promise.all( [
+		send( MSG.GET_STATE ), currentTab()
 	] );
+
+	renderSiteStatus( tab, diagnosis );
 
 	el( 'master-toggle' ).checked = state.enabled;
 	el( 'master-label' ).textContent = state.enabled ? 'On' : 'Off';
@@ -210,6 +282,29 @@ function renderElevatedWarning( report ) {
 	el( 'elevated-text' ).textContent = blocked.reason;
 	box.hidden = false;
 }
+
+el( 'site-allow' ).addEventListener( 'click', async ( ev ) => {
+	const origin = ev.target.dataset.origin;
+	if ( !origin ) {
+		return;
+	}
+	// The request must name a pattern the manifest declared, not the bare
+	// origin. The permission may already be there, in which case this only
+	// records the acknowledgement.
+	const pattern = optionalPatternFor( origin );
+	if ( pattern ) {
+		const granted = await ext.permissions.request( { origins: [ pattern ] } );
+		if ( !granted ) {
+			return;
+		}
+	}
+	await send( MSG.ACK_SITE, { origin } );
+	const [ tab ] = await ext.tabs.query( { active: true, currentWindow: true } );
+	if ( tab ) {
+		await ext.tabs.reload( tab.id );
+	}
+	window.close();
+} );
 
 el( 'elevated-ack' ).addEventListener( 'click', async () => {
 	const [ tab ] = await ext.tabs.query( { active: true, currentWindow: true } );

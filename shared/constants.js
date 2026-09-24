@@ -107,7 +107,9 @@ export const STATUS = {
 	BLOCKED_PAGE: 'blocked-page',
 	BLOCKED_ELEVATED: 'blocked-elevated',
 	CONFLICT: 'conflict',
-	TIMED_OUT: 'timed-out'
+	TIMED_OUT: 'timed-out',
+	// The page has not said anything about this file yet.
+	PENDING: 'pending'
 };
 
 /** Message types between the popup, the background worker and the content scripts. */
@@ -126,5 +128,39 @@ export const MSG = {
 	ACK_ELEVATED: 'ack-elevated',
 	GET_SETTINGS: 'get-settings',
 	SET_SETTING: 'set-setting',
-	GET_STYLES: 'get-styles'
+	GET_STYLES: 'get-styles',
+	ACK_SITE: 'ack-site',
+	GET_DIAGNOSIS: 'get-diagnosis'
 };
+
+
+/**
+ * Find the declared pattern that covers an origin.
+ *
+ * A permission request must name something the manifest lists, and the
+ * manifest lists wildcards. So a request for https://en.wikipedia.org has
+ * to be made as https://*.wikipedia.org/*.
+ *
+ * @param {string} origin
+ * @return {string|null}
+ */
+export function optionalPatternFor( origin ) {
+	let host;
+	try {
+		host = new URL( origin ).hostname;
+	} catch ( e ) {
+		return null;
+	}
+	for ( const pattern of PROD_WIKI_MATCHES ) {
+		const bare = pattern.replace( /^https?:\/\//, '' ).replace( /\/.*$/, '' );
+		if ( bare.startsWith( '*.' ) ) {
+			const suffix = bare.slice( 1 );
+			if ( host === bare.slice( 2 ) || host.endsWith( suffix ) ) {
+				return pattern;
+			}
+		} else if ( host === bare ) {
+			return pattern;
+		}
+	}
+	return null;
+}

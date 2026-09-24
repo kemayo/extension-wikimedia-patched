@@ -9,5 +9,8 @@
 		"test": "npm run build && node --test \"test/*.test.js\"",
 		"smoke": "node scripts/gerrit-smoke.mjs",
 		"smoke:less": "node scripts/less-smoke.mjs"
+	},
+	"dependencies": {
+		"less": "^4.9.1"
 	}
 }

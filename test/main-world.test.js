@@ -49,6 +49,7 @@ async function startPage( payload, onRequest ) {
 function patchWith( overrides ) {
 	return {
 		active: true,
+		reason: null,
 		siteKind: 'dev',
 		elevatedAck: false,
 		patches: [ Object.assign( {
@@ -232,15 +233,35 @@ test( 'a declarator that throws falls through to the original impl', async () =>
 	assert.ok( page.window.mw.loader.moduleRegistry[ 'ext.visualEditor.editCheck.checks' ] );
 } );
 
-test( 'nothing is touched when the switch is off', async () => {
-	const { page, reports } = await startPage( { active: false, reason: 'switched-off', patches: [] } );
+test( 'nothing is touched when the switch is off, but the page still says so', async () => {
+	const { page, reports } = await startPage(
+		{ active: false, reason: 'switched-off', patches: [] } );
 	bootMediaWiki( page );
 	page.runScript( 'mw.editcheck = { registered: [] };' );
 	page.runScript( CHECKS_PAYLOAD );
 	await page.window.mw.loader.using( 'ext.visualEditor.editCheck.checks' );
-	await page.flush( 10 );
+	await page.flush( 100 );
+
 	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.registered' ) ], [ 'AddReference' ] );
-	assert.equal( reports.length, 0 );
+	// Silence would look the same as a broken install, so the page reports
+	// that it ran and did nothing, and why.
+	assert.ok( reports.length > 0, 'the page must say it ran' );
+	assert.equal( reports.at( -1 ).active, false );
+	assert.equal( reports.at( -1 ).reason, 'switched-off' );
+	assert.equal( reports.at( -1 ).files.length, 0 );
+} );
+
+test( 'a page that is patched says so in the same report', async () => {
+	const { reports } = await runChecksModule( patchWith( {
+		newFiles: [ {
+			path: 'editcheck/modules/editchecks/checks/SourceVerificationEditCheck.js',
+			kind: 'js',
+			siblings: [ 'AddReferenceEditCheck.js', 'init.js' ],
+			source: "mw.editcheck.registered.push( 'SourceVerification' );"
+		} ]
+	} ) );
+	assert.equal( reports.at( -1 ).active, true );
+	assert.equal( reports.at( -1 ).reason, null );
 } );
 
 test( 'a credential page refuses every patch', async () => {

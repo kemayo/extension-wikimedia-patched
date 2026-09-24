@@ -141,6 +141,55 @@ async function buildPagePayload( origin ) {
 	};
 }
 
+/**
+ * Say why a tab is or is not being patched.
+ *
+ * Without this the popup can only show per-file results, and a page that
+ * never ran looks the same as a page where nothing matched. Those need
+ * different answers from the user, so they must look different.
+ *
+ * @param {number} tabId
+ * @return {Promise<Object>}
+ */
+async function diagnose( tabId ) {
+	let tab = null;
+	try {
+		tab = await ext.tabs.get( tabId );
+	} catch ( e ) {
+		return { reason: 'no-tab' };
+	}
+	let origin = null;
+	try {
+		origin = new URL( tab.url ).origin;
+	} catch ( e ) {
+		return { reason: 'not-a-wiki', url: tab.url || null };
+	}
+
+	const siteKind = classifyOrigin( origin );
+	let hasPermission = true;
+	try {
+		hasPermission = await ext.permissions.contains( { origins: [ origin + '/*' ] } );
+	} catch ( e ) {
+		// Older browsers may refuse the check; assume it is granted.
+	}
+
+	const patches = await store.getPatches();
+	const payload = await buildPagePayload( origin );
+
+	return {
+		origin,
+		siteKind,
+		hasPermission,
+		enabled: await store.isEnabled(),
+		patchCount: patches.length,
+		readyPatchCount: patches.filter( ( p ) => p.enabled && p.reviewed ).length,
+		acknowledged: siteKind === 'prod' ? await store.hasProductionAck( origin ) : true,
+		active: payload.active,
+		reason: payload.reason,
+		report: getTabStatus( tabId )
+	};
+}
+
 /** Compiled stylesheets, keyed by patch, skin and wiki version. */
 const styleCache = new Map();
 
@@ -273,6 +322,15 @@ async function dispatch( msg, sender ) {
 			}
 			return { styles: await buildStyles( msg.skinKey, msg.version ) };
 		}
+
+		case MSG.ACK_SITE:
+			// The popup has already asked the browser for the host
+			// permission. This records that the user accepted the risk.
+			await store.ackProduction( msg.origin );
+			return { ok: true };
+
+		case MSG.GET_DIAGNOSIS:
+			return { diagnosis: await diagnose( msg.tabId ) };
 
 		case MSG.GET_SETTINGS:
 			return { settings: await store.getSettings() };

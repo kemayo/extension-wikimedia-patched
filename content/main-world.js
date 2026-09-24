@@ -128,7 +128,15 @@
 		reportTimer = setTimeout( () => {
 			reportTimer = null;
 			document.dispatchEvent( new CustomEvent( channel + ':out', {
-				detail: { files: results.slice(), siteNote }
+				detail: {
+					files: results.slice(),
+					siteNote,
+					// Without these the popup cannot tell "nothing matched"
+					// from "the extension never ran here".
+					active: !!( payload && payload.active ),
+					reason: payload ? payload.reason : 'no-answer',
+					ranAt: Date.now()
+				}
 			} ) );
 		}, 50 );
 	}
@@ -777,10 +785,44 @@
 		return !!( mw && mw.loader && mw.loader.maxQueryLength === 0 );
 	}
 
+	/**
+	 * Say in the console what happened.
+	 *
+	 * A developer debugging "the patch did nothing" reaches for the console
+	 * before the popup, so the answer has to be there too.
+	 */
+	function logSummary() {
+		const tag = '[WikimediaPatched]';
+		if ( !payload ) {
+			// eslint-disable-next-line no-console
+			console.warn( tag, 'the extension bridge never answered' );
+			return;
+		}
+		if ( !payload.active ) {
+			// eslint-disable-next-line no-console
+			console.warn( tag, 'no patch applied:', payload.reason || 'nothing enabled' );
+			return;
+		}
+		const counts = {};
+		for ( const row of results ) {
+			counts[ row.status ] = ( counts[ row.status ] || 0 ) + 1;
+		}
+		// eslint-disable-next-line no-console
+		console.info( tag, `${ payload.patches.length } patch(es)`, counts,
+			`${ seenModules.length } modules seen`, results );
+	}
+
 	function finish() {
 		safely( applyStyles );
 		safely( moveStylesLast );
 		safely( reportLeftovers );
+		safely( logSummary );
+		if ( !payload || !payload.active ) {
+			// Nothing was applied. Report anyway: silence looks the same as
+			// a broken install, and the two need different fixes.
+			scheduleReport();
+			return;
+		}
 		if ( payload && payload.active ) {
 			const count = payload.patches.length;
 			const where = payload.siteKind === 'prod' ? 'a production wiki' : 'a test wiki';
@@ -793,6 +835,9 @@
 	}
 
 	onPayload( () => {
+		// An early word, so the popup knows the page is alive even before
+		// the modules have all arrived.
+		scheduleReport();
 		if ( document.readyState === 'complete' ) {
 			setTimeout( finish, 1500 );
 		} else {
