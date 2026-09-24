@@ -205,6 +205,58 @@
 
 	let messagesDone = false;
 
+	/** Every patched message, later patches in stack order winning. */
+	function patchedMessages() {
+		const all = {};
+		for ( const patch of ( payload && payload.active && payload.patches ) || [] ) {
+			Object.assign( all, patch.messages || {} );
+		}
+		return all;
+	}
+
+	/**
+	 * Put patched text into a module's own message blob.
+	 *
+	 * Core calls mw.messages.set() with a module's blob when the module runs,
+	 * so a message the patch changes would be set back to the deployed text
+	 * at that moment. Changing the blob before the module runs stops that.
+	 *
+	 * @param {Object|undefined} blob
+	 */
+	function patchMessageBlob( blob ) {
+		if ( !blob || typeof blob !== 'object' ) {
+			return;
+		}
+		for ( const [ key, text ] of Object.entries( patchedMessages() ) ) {
+			if ( Object.prototype.hasOwnProperty.call( blob, key ) ) {
+				blob[ key ] = text;
+			}
+		}
+	}
+
+	/**
+	 * Apply the parts of a patch that are not in any module: its messages
+	 * and its styles.
+	 *
+	 * Only once the page guard has passed, so a credential page or an
+	 * unconfirmed elevated account gets none of it. Core fills mw.config
+	 * before it loads any module, so the guard can run by the first module,
+	 * and that is still before any module runs.
+	 *
+	 * @param {Object} mw
+	 */
+	let extrasDone = false;
+
+	function applyPageExtras( mw ) {
+		if ( extrasDone || !payload || !payload.active ) {
+			return;
+		}
+		extrasDone = true;
+		safely( applyMessages, mw );
+		safely( applyStyles );
+		safely( requestSkinStyles, mw );
+	}
+
 	/** Install the English messages the patch adds. */
 	function applyMessages( mw ) {
 		if ( !payload || !payload.active ) {
@@ -837,6 +889,8 @@
 			}
 			return;
 		}
+		applyPageExtras( mw );
+		patchMessageBlob( data[ 3 ] );
 
 		const script = data[ 1 ];
 		if ( typeof script === 'function' ) {
@@ -957,6 +1011,12 @@
 				record( patch.key, '(page)', guard.status, guard.reason );
 			}
 			return;
+		}
+		applyPageExtras( mw );
+		// A module that has not run yet can still take the patched text.
+		const known = mw.loader.moduleRegistry && mw.loader.moduleRegistry[ entry.name ];
+		if ( known && known.state !== 'ready' ) {
+			patchMessageBlob( known.messages );
 		}
 
 		// Note which changed files this module holds. Phase 3 replaces them.
@@ -1204,8 +1264,6 @@
 
 	function onMw( mw ) {
 		onPayload( () => {
-			safely( applyMessages, mw );
-			safely( applyStyles );
 			// Some modules may already be here. Look at them again now that
 			// the extension knows what to do.
 			for ( const entry of seenModules.slice() ) {
@@ -1283,7 +1341,10 @@
 	}
 
 	function finish() {
-		safely( applyStyles );
+		const mw = window.mw;
+		if ( mw && mw.config && checkPage( mw ).ok ) {
+			safely( applyPageExtras, mw );
+		}
 		safely( moveStylesLast );
 		safely( reportLeftovers );
 		safely( logSummary );

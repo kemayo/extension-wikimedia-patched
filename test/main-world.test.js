@@ -108,13 +108,19 @@ test( 'hooking leaves mw and mw.loader as plain properties', async () => {
 	assert.equal( page.window.mw, page.window.mediaWiki );
 } );
 
-test( 'messages are set before any module runs', async () => {
+test( 'a module sees the patched messages when it runs', async () => {
+	// The new edit check calls ve.msg() as it loads, so its messages must be
+	// in place before its module runs, not merely before the page ends.
 	const { page } = await startPage( patchWith( {
 		messages: { 'editcheck-sourceveri-title': 'Check the source' }
 	} ) );
 	bootMediaWiki( page );
-	assert.equal( page.window.mw.messages.get( 'editcheck-sourceveri-title' ),
-		'Check the source' );
+	page.runScript( 'mw.seen = null;' );
+	page.runScript( modulePayload( 'ext.visualEditor.editCheck', 'init.js', {
+		'init.js': "mw.seen = mw.messages.get( 'editcheck-sourceveri-title' );"
+	} ) );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	assert.equal( page.window.mw.seen, 'Check the source' );
 } );
 
 // ------------------------------------------------------------------ injection
@@ -1111,4 +1117,73 @@ test( 'a module released unpatched at the timeout is reported, and later ones ar
 	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
 	await page.flush( 100 );
 	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ] );
+} );
+
+// --------------------------------------------------------------- messages
+
+/** A module that ships its own copy of a message, as core modules do. */
+function moduleWithMessage( name, key, text ) {
+	return `mw.loader.impl(function(){return[${ JSON.stringify( name + '@' ) },` +
+		'{"main":"init.js","files":{"init.js":function(require,module,exports){}}},' +
+		`{},${ JSON.stringify( { [ key ]: text } ) }];});`;
+}
+
+test( 'a changed message keeps the patched text after its module runs', async () => {
+	// Core sets a module's own messages when it runs, which used to put
+	// the deployed text back while the popup said "applied".
+	const { page } = await startPage( patchWith( {
+		messages: { 'editcheck-dialog-title': 'Patched title' }
+	} ) );
+	bootMediaWiki( page );
+	page.runScript( moduleWithMessage( 'ext.visualEditor.editCheck',
+		'editcheck-dialog-title', 'Deployed title' ) );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	assert.equal( page.window.mw.messages.get( 'editcheck-dialog-title' ), 'Patched title' );
+} );
+
+test( 'a module that arrived before the data still gets the patched message', async () => {
+	const { page, channel } = await startPage( null );
+	bootMediaWiki( page );
+	page.runScript( moduleWithMessage( 'ext.visualEditor.editCheck',
+		'editcheck-dialog-title', 'Deployed title' ) );
+	page.runScript(
+		`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':in' ) }, ` +
+		`{ detail: ${ JSON.stringify( patchWith( {
+			messages: { 'editcheck-dialog-title': 'Patched title' } } ) ) } } ) );` );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	assert.equal( page.window.mw.messages.get( 'editcheck-dialog-title' ), 'Patched title' );
+} );
+
+// ------------------------------------------------------ guard covers all
+
+async function guardedPage( configScript ) {
+	const { page } = await startPage( patchWith( {
+		messages: { 'login-title': 'from a patch' },
+		styles: [ { path: 'a.css', css: 'input[type=password] { background: red; }' } ]
+	} ) );
+	bootMediaWiki( page );
+	// As core does: config first, then the first module.
+	page.runScript( configScript );
+	page.runScript( CHECKS_PAYLOAD.replace( 'mw.editcheck.registered.push', 'void' ) );
+	page.runScript( 'window.dispatchEvent( { type: "load" } );' );
+	await page.flush( 1700 );
+	return {
+		message: page.window.mw.messages.get( 'login-title' ),
+		css: page.document.head.children.some( ( c ) => c.id === 'wikimedia-patched-styles' )
+	};
+}
+
+test( 'a credential page gets no patch messages or styles either', async () => {
+	const got = await guardedPage( 'mw.config.set( "wgCanonicalSpecialPageName", "Userlogin" );' );
+	assert.deepEqual( got, { message: null, css: false } );
+} );
+
+test( 'an unconfirmed elevated account gets no patch messages or styles', async () => {
+	const got = await guardedPage( 'mw.config.set( "wgUserGroups", [ "sysop" ] );' );
+	assert.deepEqual( got, { message: null, css: false } );
+} );
+
+test( 'an ordinary page gets both', async () => {
+	const got = await guardedPage( 'mw.config.set( "wgPageName", "Earth" );' );
+	assert.deepEqual( got, { message: 'from a patch', css: true } );
 } );
