@@ -20,7 +20,8 @@ import {
 	enableDebug, disableDebug, clearAllDebugCookies,
 	enableDebugForTab, disableDebugForTab, installFirefoxRewrite
 } from './debug-mode.js';
-import { setTabStatus, getTabStatus, watchTabs } from './tab-state.js';
+import { setTabStatus, getTabStatus, watchTabs, paintBadge } from './tab-state.js';
+import { badgeFor } from './badge.js';
 
 /** Turn a match pattern into a host test. */
 function matchToRegExp( pattern ) {
@@ -175,8 +176,6 @@ async function diagnose( tabId ) {
 	}
 
 	const patches = await store.getPatches();
-	const payload = await buildPagePayload( origin );
-
 	return {
 		origin,
 		siteKind,
@@ -184,11 +183,30 @@ async function diagnose( tabId ) {
 		enabled: await store.isEnabled(),
 		patchCount: patches.length,
 		readyPatchCount: patches.filter( ( p ) => p.enabled && p.reviewed ).length,
+		unreviewedCount: patches.filter( ( p ) => !p.reviewed ).length,
 		acknowledged: siteKind === 'prod' ? await store.hasProductionAck( origin ) : true,
-		active: payload.active,
-		reason: payload.reason,
+		reason: null,
 		report: getTabStatus( tabId )
 	};
+}
+
+/**
+ * Repaint one tab's badge from what is known about it now.
+ *
+ * @param {number} tabId
+ */
+async function refreshBadge( tabId ) {
+	try {
+		paintBadge( tabId, badgeFor( await diagnose( tabId ) ) );
+	} catch ( e ) {
+		// The tab may have closed.
+	}
+}
+
+/** Repaint every tab, after a change that can affect them all. */
+async function refreshAllBadges() {
+	const tabs = await ext.tabs.query( {} ).catch( () => [] );
+	await Promise.all( tabs.map( ( tab ) => refreshBadge( tab.id ) ) );
 }
 
 /**
@@ -262,6 +280,12 @@ async function buildStyles( skinKey, version ) {
 	return out;
 }
 
+/** Messages after which every badge may be out of date. */
+const CHANGES_BADGES = new Set( [
+	MSG.SET_ENABLED, MSG.ADD_PATCH, MSG.REMOVE_PATCH, MSG.SET_PATCH_ENABLED,
+	MSG.REVIEW_PATCH, MSG.ACK_SITE, MSG.ACK_ELEVATED
+] );
+
 /** Handle one message. Split out so the listener can stay small. */
 async function dispatch( msg, sender ) {
 	switch ( msg.type ) {
@@ -333,6 +357,7 @@ async function dispatch( msg, sender ) {
 		case MSG.REPORT_STATUS:
 			if ( sender.tab ) {
 				setTabStatus( sender.tab.id, msg.report );
+				refreshBadge( sender.tab.id );
 			}
 			if ( msg.report && msg.report.version && sender.origin ) {
 				rememberVersion( sender.origin, msg.report.version );
@@ -379,6 +404,14 @@ async function dispatch( msg, sender ) {
 
 ext.runtime.onMessage.addListener( ( msg, sender, sendResponse ) => {
 	dispatch( msg, sender )
+		.then( ( result ) => {
+			// A change to the switch, a site's confirmation or the patch
+			// list can change what every tab's badge should say.
+			if ( CHANGES_BADGES.has( msg.type ) ) {
+				refreshAllBadges();
+			}
+			return result;
+		} )
 		.then( ( result ) => sendResponse( { ok: true, result } ) )
 		.catch( ( err ) => sendResponse( { ok: false, error: String( err && err.message || err ) } ) );
 	// Keep the channel open for the async reply.
@@ -437,6 +470,6 @@ ext.tabs.onRemoved.addListener( ( tabId ) => {
 	disableDebugForTab( tabId );
 } );
 
-watchTabs();
+watchTabs( refreshBadge );
 
 export { buildPagePayload, disableDebug };

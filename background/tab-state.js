@@ -1,27 +1,17 @@
 /**
- * Per-tab results and the toolbar badge.
+ * Per-tab results, and painting the toolbar badge.
  *
- * A silent no-op reads to the user as "the patch is broken". So every file
- * gets a result, and the badge shows how many landed.
+ * What the badge says is decided in badge.js; this only holds the reports
+ * and applies the result.
  */
 
 import { ext } from '../shared/webext.js';
-import { STATUS } from '../shared/constants.js';
 
 /** Tab id to the last report from that tab. */
 const byTab = new Map();
 
-const GOOD = new Set( [
-	STATUS.APPLIED, STATUS.APPLIED_NEW, STATUS.MERGED, STATUS.STYLE_INJECTED
-] );
-const BAD = new Set( [ STATUS.CONFLICT, STATUS.TIMED_OUT ] );
-const WARN = new Set( [
-	STATUS.BASE_SKEW, STATUS.AMBIGUOUS, STATUS.UNMATCHED, STATUS.STYLE_SKIPPED
-] );
-
 export function setTabStatus( tabId, report ) {
 	byTab.set( tabId, { ...report, at: Date.now() } );
-	updateBadge( tabId );
 }
 
 export function getTabStatus( tabId ) {
@@ -33,32 +23,31 @@ export function clearTabStatus( tabId ) {
 }
 
 /**
- * Show how many files landed, and colour by the worst result.
- *
  * @param {number} tabId
+ * @param {{ text: string, colour: string, title: string }} badge
  */
-export function updateBadge( tabId ) {
-	const report = byTab.get( tabId );
-	if ( !report || !report.files || !report.files.length ) {
-		ext.action.setBadgeText( { tabId, text: '' } ).catch( () => {} );
-		return;
-	}
-	const applied = report.files.filter( ( f ) => GOOD.has( f.status ) ).length;
-	const total = report.files.filter( ( f ) => f.status !== STATUS.SERVER_SIDE ).length;
-	const worst = report.files.some( ( f ) => BAD.has( f.status ) ) ? '#d73333' :
-		report.files.some( ( f ) => WARN.has( f.status ) ) ? '#ac6600' : '#14866d';
-
-	ext.action.setBadgeText( { tabId, text: `${ applied }/${ total }` } ).catch( () => {} );
-	ext.action.setBadgeBackgroundColor( { tabId, color: worst } ).catch( () => {} );
+export function paintBadge( tabId, badge ) {
+	ext.action.setBadgeText( { tabId, text: badge.text } ).catch( () => {} );
+	ext.action.setBadgeBackgroundColor( { tabId, color: badge.colour } ).catch( () => {} );
+	ext.action.setTitle( { tabId, title: badge.title } ).catch( () => {} );
 }
 
-/** Forget a tab when it closes, so the map cannot grow without limit. */
-export function watchTabs() {
+/**
+ * Forget a tab's report when it closes or starts a new page.
+ *
+ * @param {function(number)} onLoaded Called some time after a page in the
+ *   tab finishes loading, to repaint the badge. A page the content script
+ *   never reached sends no report, so this is the only chance to show it.
+ */
+export function watchTabs( onLoaded ) {
 	ext.tabs.onRemoved.addListener( ( tabId ) => clearTabStatus( tabId ) );
 	ext.tabs.onUpdated.addListener( ( tabId, info ) => {
 		if ( info.status === 'loading' ) {
 			clearTabStatus( tabId );
 			ext.action.setBadgeText( { tabId, text: '' } ).catch( () => {} );
+		} else if ( info.status === 'complete' ) {
+			// The page reports after it settles, so wait before judging.
+			setTimeout( () => onLoaded( tabId ), 3000 );
 		}
 	} );
 }
