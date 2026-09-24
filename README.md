@@ -95,10 +95,15 @@ npm run smoke          # reads a real change from gerrit.wikimedia.org
 npm run smoke:less     # resolves that change's stylesheet imports
 ```
 
-The build copies `node_modules/less` into `vendor/` when it is there. The
-extension never fetches a compiler at run time: code has to ship in the
-package. Without it, stylesheets are reported as skipped and everything else
-still works.
+The build vendors `node_modules/less/lib/less` into `vendor/` when it is
+there. Not `dist/less.min.js`: that build is for a browser page and reads
+`document.currentScript` as it loads, so it throws in a background worker.
+`lib/less` is the environment-agnostic core and needs no DOM. Its two bare
+imports are rewritten to copies placed beside it.
+
+The extension never fetches a compiler at run time: code has to ship in the
+package. Without one, stylesheets are reported as skipped and everything
+else still works.
 
 - **Chrome**: `chrome://extensions` -> Developer mode -> Load unpacked ->
   `dist/chrome`.
@@ -137,11 +142,14 @@ Verified:
   gate, and that a throwing declarator does not break the page.
 - The Gerrit pipeline. `npm run smoke` reads change 1321624 from the real
   Gerrit and prints what the extension would do with each of its files.
-- Import resolution. `npm run smoke:less` resolves that change's stylesheet
-  against the live repositories at the branch enwiki runs, and finds all
-  eight files with nothing missing. The offline tests cover the rules
-  themselves, including that an `@import` inside a comment is left alone —
-  MediaWiki's own files show examples that way.
+- Import resolution and compiling. `npm run smoke:less` resolves that
+  change's stylesheet against the live repositories at the branch enwiki
+  runs, finds all eight files, and compiles the 170KB result down to the
+  patch's own rules. Codex tokens come out as
+  `var( --border-color-muted, #dadde3 )`, so one compiled blob stays correct
+  in light and dark mode. The offline tests cover the rules themselves,
+  including that an `@import` inside a comment is left alone — MediaWiki's
+  own files show examples that way.
 
 Not verified, because it needs a real browser:
 
@@ -156,9 +164,9 @@ Not verified, because it needs a real browser:
   module in Firefox. If they do not, the fallback is the
   `<script src=moz-extension://…>` injection, which is not written yet.
 - The production permission prompt.
-- The bundled LESS compiler. `npm` is not reachable from the sandbox this was
-  written in, so `vendor/less.js` is still the placeholder and `compileLess`
-  has never run. Everything up to it is tested.
+- Whether a background service worker imports the vendored compiler the same
+  way Node does. Node has no `document` either, which is why the vendored
+  build is the DOM-free one, but a worker is not a perfect stand-in.
 
 ## Status
 

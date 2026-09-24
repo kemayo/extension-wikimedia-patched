@@ -38,3 +38,12 @@ for ( const f of result.files ) {
 console.log( `\nflattened: ${ result.source.length }B` );
 console.log( `missing: ${ result.missing.length ? '\n  ' + result.missing.join( '\n  ' ) : 'none' }` );
 console.log( `errors: ${ result.errors.length ? '\n  ' + result.errors.join( '\n  ' ) : 'none' }` );
+
+const { compileLess } = await import( '../shared/less-compile.js' );
+const compiled = await compileLess( result.source, { filename: path } );
+if ( compiled.ok ) {
+	console.log( `\ncompiled: ${ compiled.css.length }B of CSS` );
+	console.log( compiled.css.split( '\n' ).slice( 0, 14 ).join( '\n' ) );
+} else {
+	console.log( `\ncompile failed: ${ compiled.reason }` );
+}
