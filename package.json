@@ -1,6 +1,6 @@
 {
 	"name": "wikimedia-patched",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"private": true,
 	"type": "module",
 	"description": "Apply unmerged Gerrit patches to live Wikimedia wikis.",
