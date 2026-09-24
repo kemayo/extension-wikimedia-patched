@@ -70,6 +70,25 @@ jobs:
           ( cd dist/chrome && zip -r -X "../../release/wikimedia-patched-chrome-$VERSION.zip" . )
           ( cd dist/firefox && zip -r -X "../../release/wikimedia-patched-firefox-$VERSION.zip" . )
 
+      # Publish before signing, so a slow or failed signing costs only the
+      # Firefox file, not the whole release. On a re-run the release is
+      # already there, so refresh its zips instead.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.zip \
+              --title "WikimediaPatched $VERSION" \
+              --generate-notes \
+              --verify-tag
+          fi
+
+      # AMO usually approves an unlisted version in minutes, but the signed
+      # file can lag behind the approval email. Wait up to 30 minutes.
       - name: Sign for Firefox
         if: env.AMO_JWT_ISSUER != '' && env.AMO_JWT_SECRET != ''
         env:
@@ -80,6 +99,7 @@ jobs:
             --channel unlisted \
             --api-key "$AMO_JWT_ISSUER" \
             --api-secret "$AMO_JWT_SECRET" \
+            --approval-timeout 1800000 \
             --artifacts-dir web-ext-artifacts
           cp web-ext-artifacts/*.xpi "release/wikimedia-patched-firefox-$VERSION.xpi"
 
@@ -94,12 +114,13 @@ jobs:
             "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/wikimedia-patched-firefox-$VERSION.xpi" \
             release/updates.json
 
-      - name: Publish the release
+      - name: Attach the signed Firefox files
+        if: env.AMO_JWT_ISSUER != '' && env.AMO_JWT_SECRET != ''
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release/* \
-            --title "WikimediaPatched $VERSION" \
-            --generate-notes \
-            --verify-tag
+          gh release upload "$GITHUB_REF_NAME" \
+            "release/wikimedia-patched-firefox-$VERSION.xpi" \
+            release/updates.json \
+            --clobber

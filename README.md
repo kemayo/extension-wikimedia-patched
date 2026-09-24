@@ -127,6 +127,50 @@ XPI through AMO's unlisted channel, add your AMO API key as the repository
 secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. Without them the release has
 the Firefox zip only, which loads as a temporary add-on.
 
+### When Firefox signing stalls or fails
+
+The release is published with both zips before signing starts, so a
+problem with signing costs only the Firefox files. The signing step waits
+up to 30 minutes for AMO. The approval email can arrive well before the
+signed file is ready to download.
+
+If the signing step fails, first look at the version on the AMO
+Developer Hub.
+
+**AMO signed it anyway**, which usually means the step ran out of time.
+Do not re-run the job: AMO signs a version only once, so the re-run fails
+at signing. Attach the files by hand instead:
+
+1. Download the signed `.xpi` from the version's page on the Developer
+   Hub.
+2. Build with the same settings as the release, so the manifest matches
+   the signed file, and write the update manifest. For `v0.1.0`:
+
+   ```sh
+   WMP_VERSION=0.1.0 \
+   WMP_UPDATE_URL=https://github.com/kemayo/extension-wikimedia-patched/releases/latest/download/updates.json \
+     npm run build
+   cp ~/Downloads/<the-signed-file>.xpi wikimedia-patched-firefox-0.1.0.xpi
+   node scripts/firefox-updates.mjs wikimedia-patched-firefox-0.1.0.xpi \
+     https://github.com/kemayo/extension-wikimedia-patched/releases/download/v0.1.0/wikimedia-patched-firefox-0.1.0.xpi \
+     updates.json
+   ```
+
+3. Attach both to the release:
+
+   ```sh
+   gh release upload v0.1.0 wikimedia-patched-firefox-0.1.0.xpi updates.json --clobber
+   ```
+
+The XPI's file name must match the one in `updates.json`, or Firefox finds
+the update but cannot download it.
+
+**AMO has no such version**, because the upload itself failed: re-run the
+failed job. It finds the existing release and adds to it.
+
+**AMO rejected it**: fix the cause, and tag a new version. The rejected
+version number is used up.
+
 ### Installing a release
 
 Download the file for your browser from the
