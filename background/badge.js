@@ -88,6 +88,19 @@ export function badgeFor( d ) {
 	const applied = counted.filter( ( f ) => GOOD.has( f.status ) ).length;
 	const worst = counted.some( ( f ) => BAD.has( f.status ) ) ? 'bad' :
 		counted.some( ( f ) => WARN.has( f.status ) ) ? 'warn' : 'good';
+
+	// Nothing landed, and nothing went wrong: the patch's modules are just
+	// not on this page, as VisualEditor's are not until the user edits.
+	// Green would read as "applied".
+	if ( !applied && worst === 'good' ) {
+		return {
+			text: `0/${ counted.length }`,
+			colour: COLOURS.quiet,
+			title: counted.length ?
+				"None of the patched files are used on this page yet." :
+				'The patches change nothing this page uses.'
+		};
+	}
 	return {
 		text: `${ applied }/${ counted.length }`,
 		colour: COLOURS[ worst ],

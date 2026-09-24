@@ -81,3 +81,23 @@ test( 'applied files are counted, coloured by the worst result', () => {
 	b = badgeFor( ready( { report: files( 'applied', 'conflict' ) } ) );
 	assert.equal( b.colour, COLOURS.bad );
 } );
+
+test( 'nothing landed and nothing wrong is grey, not green', () => {
+	// VE's modules are not on a page the user is only reading.
+	const b = badgeFor( ready( { report: { active: true, files: [
+		{ path: 'a.js', status: 'not-on-page' }, { path: 'b.js', status: 'not-on-page' }
+	] } } ) );
+	assert.equal( b.text, '0/2' );
+	assert.equal( b.colour, COLOURS.quiet );
+	assert.match( b.title, /not used on this page|used on this page yet/ );
+	// Only server-side files: nothing this page uses.
+	const s = badgeFor( ready( { report: { active: true, files: [
+		{ path: 'x.php', status: 'server-side' } ] } } ) );
+	assert.equal( s.colour, COLOURS.quiet );
+} );
+
+test( 'nothing landed because of a problem is still flagged', () => {
+	const b = badgeFor( ready( { report: { active: true, files: [
+		{ path: 'a.js', status: 'ambiguous' } ] } } ) );
+	assert.equal( b.colour, COLOURS.warn );
+} );
