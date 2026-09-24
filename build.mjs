@@ -109,8 +109,14 @@ function firefoxManifest() {
 	m.permissions.push( 'webRequest', 'webRequestBlocking' );
 	m.browser_specific_settings = {
 		gecko: {
-			id: 'wikimedia-patched@wikimedia.org',
+			// Permanent: AMO ties the add-on to it, and a new id is a new
+			// add-on that existing installs never update to.
+			id: 'wikimedia-patched@delink.dev',
 			strict_min_version: '128.0',
+			// AMO wants new add-ons to say what they collect. This one sends
+			// nothing about the user anywhere: it only reads from Gerrit.
+			// Firefox before 140 ignores the key.
+			data_collection_permissions: { required: [ 'none' ] },
 			...( UPDATE_URL ? { update_url: UPDATE_URL } : {} )
 		}
 	};

@@ -29,3 +29,11 @@ test( 'only a release build tells Firefox where to find updates', () => {
 	const chrome = JSON.parse( readFileSync( 'dist/chrome/manifest.json', 'utf8' ) );
 	assert.equal( chrome.browser_specific_settings, undefined, 'Chrome has no such key' );
 } );
+
+test( 'the Firefox manifest has the add-on id and the data declaration', () => {
+	const gecko = JSON.parse( readFileSync( 'dist/firefox/manifest.json', 'utf8' ) )
+		.browser_specific_settings.gecko;
+	// The id is permanent: changing it makes a new add-on.
+	assert.equal( gecko.id, 'wikimedia-patched@delink.dev' );
+	assert.deepEqual( gecko.data_collection_permissions, { required: [ 'none' ] } );
+} );
