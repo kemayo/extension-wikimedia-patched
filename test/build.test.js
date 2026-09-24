@@ -21,3 +21,11 @@ test( 'the manifest version is the package version, in both browsers', () => {
 		assert.equal( manifest.version, process.env.WMP_VERSION || pkg, browser );
 	}
 } );
+
+test( 'only a release build tells Firefox where to find updates', () => {
+	const gecko = JSON.parse( readFileSync( 'dist/firefox/manifest.json', 'utf8' ) )
+		.browser_specific_settings.gecko;
+	assert.equal( gecko.update_url, process.env.WMP_UPDATE_URL || undefined );
+	const chrome = JSON.parse( readFileSync( 'dist/chrome/manifest.json', 'utf8' ) );
+	assert.equal( chrome.browser_specific_settings, undefined, 'Chrome has no such key' );
+} );

@@ -149,8 +149,10 @@ browser is managed by a policy that forbids unpacked extensions.
 2. Click the gear icon, then **Install Add-on From File...**, and pick the
    `.xpi`.
 
-It stays installed across restarts. To update, install the newer `.xpi` the
-same way.
+It stays installed across restarts, and updates itself: each signed
+release carries an `updates.json`, and the build points Firefox at the
+newest release's copy. A release made without the AMO keys has no
+`updates.json`, so while it is the newest, Firefox finds no update.
 
 **Firefox, unsigned** (`wikimedia-patched-firefox-*.zip`)
 

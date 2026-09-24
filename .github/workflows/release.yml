@@ -46,10 +46,13 @@ jobs:
       # Installs less, which the build bundles into the extension.
       - run: npm ci
 
-      # npm test builds first, so this is the build that ships.
+      # npm test builds first, so this is the build that ships. The update
+      # URL is the newest release's updates.json, which GitHub serves at a
+      # stable address.
       - name: Build and test
         env:
           WMP_VERSION: ${{ steps.version.outputs.version }}
+          WMP_UPDATE_URL: https://github.com/${{ github.repository }}/releases/latest/download/updates.json
         run: npm test
 
       - name: Check that the LESS compiler is in the build
@@ -79,6 +82,17 @@ jobs:
             --api-secret "$AMO_JWT_SECRET" \
             --artifacts-dir web-ext-artifacts
           cp web-ext-artifacts/*.xpi "release/wikimedia-patched-firefox-$VERSION.xpi"
+
+      # Only a signed XPI can update, so this comes only with one.
+      - name: Write the Firefox update manifest
+        if: env.AMO_JWT_ISSUER != '' && env.AMO_JWT_SECRET != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node scripts/firefox-updates.mjs \
+            "release/wikimedia-patched-firefox-$VERSION.xpi" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/wikimedia-patched-firefox-$VERSION.xpi" \
+            release/updates.json
 
       - name: Publish the release
         env:

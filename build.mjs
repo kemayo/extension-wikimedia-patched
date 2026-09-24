@@ -92,13 +92,27 @@ function chromeManifest() {
 	return m;
 }
 
+/**
+ * Where Firefox looks for updates. The release workflow sets it, because
+ * only a signed XPI can update, and it must be in the first version a user
+ * installs or that copy never looks. A local build has none.
+ */
+const UPDATE_URL = process.env.WMP_UPDATE_URL || null;
+if ( UPDATE_URL && !/^https:\/\//.test( UPDATE_URL ) ) {
+	throw new Error( `Firefox updates only from https, not ${ UPDATE_URL }` );
+}
+
 function firefoxManifest() {
 	const m = baseManifest();
 	// Firefox keeps event pages, which survive better than a service worker.
 	m.background = { scripts: [ 'background/sw.js' ], type: 'module' };
 	m.permissions.push( 'webRequest', 'webRequestBlocking' );
 	m.browser_specific_settings = {
-		gecko: { id: 'wikimedia-patched@wikimedia.org', strict_min_version: '128.0' }
+		gecko: {
+			id: 'wikimedia-patched@wikimedia.org',
+			strict_min_version: '128.0',
+			...( UPDATE_URL ? { update_url: UPDATE_URL } : {} )
+		}
 	};
 	return m;
 }
