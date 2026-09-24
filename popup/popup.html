@@ -21,12 +21,14 @@
 </div>
 <div id="site-status" class="site-status" hidden>
 	<p id="site-status-text"></p>
-	<button type="button" id="site-allow" hidden>Allow on this site</button>
+	<button type="button" id="site-allow" hidden
+		title="Reloading loses anything unsaved on the page">Allow and reload</button>
 </div>
 
 <div id="elevated-warning" class="danger-inline" hidden>
 	<p id="elevated-text"></p>
-	<button type="button" id="elevated-ack">Apply anyway for this session</button>
+	<button type="button" id="elevated-ack"
+		title="Lasts for this browser session. Reloading loses anything unsaved on the page">Apply anyway and reload</button>
 </div>
 
 <form id="add-form">
