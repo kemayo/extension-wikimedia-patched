@@ -345,6 +345,20 @@ async function buildStyles( skinKey, version ) {
 	return out;
 }
 
+/**
+ * Show the switch in the icon itself: grey when off.
+ *
+ * The badge says what happened on one tab; the icon says whether the
+ * extension is doing anything at all. It is set for every tab at once.
+ */
+async function applyIcon() {
+	const on = await store.isEnabled();
+	const name = on ? 'icon' : 'icon-off';
+	await ext.action.setIcon( {
+		path: { 16: `icons/${ name }-16.png`, 32: `icons/${ name }-32.png` }
+	} ).catch( () => {} );
+}
+
 /** Messages after which every badge may be out of date. */
 const CHANGES_BADGES = new Set( [
 	MSG.SET_ENABLED, MSG.ADD_PATCH, MSG.REMOVE_PATCH, MSG.SET_PATCH_ENABLED,
@@ -481,6 +495,9 @@ ext.runtime.onMessage.addListener( ( msg, sender, sendResponse ) => {
 			if ( CHANGES_BADGES.has( msg.type ) ) {
 				refreshAllBadges();
 			}
+			if ( msg.type === MSG.SET_ENABLED ) {
+				applyIcon();
+			}
 			return result;
 		} )
 		.then( ( result ) => sendResponse( { ok: true, result } ) )
@@ -542,5 +559,7 @@ ext.tabs.onRemoved.addListener( ( tabId ) => {
 } );
 
 watchTabs( refreshBadge );
+// The worker restarts often, so set the icon each time it starts.
+applyIcon();
 
 export { buildPagePayload, disableDebug };

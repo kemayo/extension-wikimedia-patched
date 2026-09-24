@@ -42,9 +42,11 @@ function baseManifest() {
 		action: {
 			default_popup: 'popup/popup.html',
 			default_title: 'WikimediaPatched',
+			// The switch starts off in every browser session, so the
+			// toolbar starts grey. The worker sets the icon from then on.
 			default_icon: {
-				16: 'icons/icon-16.png',
-				32: 'icons/icon-32.png'
+				16: 'icons/icon-off-16.png',
+				32: 'icons/icon-off-32.png'
 			}
 		},
 		options_ui: { page: 'options/options.html', open_in_tab: true },

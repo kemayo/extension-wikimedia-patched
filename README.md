@@ -96,6 +96,7 @@ npm test               # unit tests, no network
 npm run smoke          # reads a real change from gerrit.wikimedia.org
 npm run smoke:less     # resolves that change's stylesheet imports
 npm run smoke:skew     # merges that change onto enwiki's live module
+node scripts/make-icons.mjs  # redraws the icons, on and off
 ```
 
 The build vendors `node_modules/less/lib/less` into `vendor/` when it is
