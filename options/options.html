@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WikimediaPatched options</title>
+<link rel="stylesheet" href="../popup/popup.css">
+<style>
+body { width: auto; max-width: 720px; }
+.danger { border: 1px solid var( --bad ); border-radius: 2px; padding: 10px; margin: 12px 0; }
+.danger h2 { margin-top: 0; font-size: 13px; color: var( --bad ); }
+ul.origins { list-style: none; padding: 0; }
+ul.origins li { padding: 3px 0; }
+</style>
+</head>
+<body>
+<h1>WikimediaPatched</h1>
+
+<div class="danger">
+	<h2>What this extension does</h2>
+	<p>
+		It runs code from an unmerged Gerrit change inside a wiki page, with your
+		account signed in. That code can do anything you can do. Only add a patch
+		after you read it.
+	</p>
+	<p>
+		It cannot apply PHP, hooks, schema changes or new module registrations.
+		Those need a real deploy. Use
+		<a href="https://patchdemo.wmcloud.org/" target="_blank" rel="noreferrer">patchdemo</a>
+		for those.
+	</p>
+</div>
+
+<h2>Production wikis</h2>
+<p class="note">
+	Development wikis work without a prompt. A production wiki needs permission,
+	and a fresh acknowledgement each time the browser starts.
+</p>
+<ul class="origins" id="origins"></ul>
+
+<h2>Debug mode</h2>
+<p class="note">
+	The extension turns on ResourceLoader debug mode so it can compare the live
+	code against the patch base. Debug mode makes a wiki much slower. If a wiki
+	stays slow after you turn the extension off, clear the cookie here.
+</p>
+<button type="button" id="clear-debug">Clear debug cookies</button>
+<span id="clear-result" class="note"></span>
+
+<script type="module" src="options.js"></script>
+</body>
+</html>

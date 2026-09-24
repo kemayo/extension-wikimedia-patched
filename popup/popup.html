@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WikimediaPatched</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header>
+	<h1>WikimediaPatched</h1>
+	<label class="switch">
+		<input type="checkbox" id="master-toggle">
+		<span id="master-label">Off</span>
+	</label>
+</header>
+
+<p id="site-note" class="note" hidden></p>
+
+<form id="add-form">
+	<input type="text" id="add-input" placeholder="Gerrit change number or URL"
+		autocomplete="off" spellcheck="false">
+	<button type="submit" id="add-button" title="Add patch">+</button>
+</form>
+<p id="add-error" class="error" hidden></p>
+
+<ul id="patch-list"></ul>
+<p id="empty" class="note">No patches yet. Add a Gerrit change above.</p>
+
+<footer>
+	<a href="#" id="open-options">Options</a>
+</footer>
+
+<template id="patch-template">
+	<li class="patch">
+		<div class="patch-head">
+			<input type="checkbox" class="patch-enabled" title="Apply this patch">
+			<div class="patch-title">
+				<a class="patch-subject" target="_blank" rel="noreferrer"></a>
+				<span class="patch-meta"></span>
+			</div>
+			<button type="button" class="patch-expand" title="Show files">&#9656;</button>
+			<button type="button" class="patch-remove" title="Remove">&times;</button>
+		</div>
+		<div class="patch-body" hidden>
+			<label class="review">
+				<input type="checkbox" class="patch-reviewed">
+				I read this code and accept that it runs on the wiki
+			</label>
+			<ul class="notes"></ul>
+			<table class="files"><tbody></tbody></table>
+			<button type="button" class="patch-refresh">Re-read from Gerrit</button>
+		</div>
+	</li>
+</template>
+
+<script type="module" src="popup.js"></script>
+</body>
+</html>
