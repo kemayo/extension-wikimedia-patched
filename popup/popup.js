@@ -202,7 +202,7 @@ function fileRowsFor( payload, report ) {
 const expanded = new Set();
 const seenKeys = new Set();
 
-function renderPatch( patch, payload, report ) {
+function renderPatch( patch, payload, report, after = [] ) {
 	const node = el( 'patch-template' ).content.firstElementChild.cloneNode( true );
 	node.dataset.key = patch.key;
 	node.classList.toggle( 'unreviewed', !patch.reviewed );
@@ -214,6 +214,12 @@ function renderPatch( patch, payload, report ) {
 	node.querySelector( '.patch-meta' ).textContent =
 		`${ patch.project } \u00b7 PS${ patch.patchset } \u00b7 ${ patch.owner }` +
 		( patch.changeStatus === 'MERGED' ? ' \u00b7 merged' : '' );
+	if ( after.length ) {
+		const note = document.createElement( 'span' );
+		note.className = 'patch-after';
+		note.textContent = ` \u00b7 runs after ${ after.map( ( k ) => k.split( '@' )[ 0 ] ).join( ', ' ) }`;
+		node.querySelector( '.patch-meta' ).append( note );
+	}
 
 	const enabled = node.querySelector( '.patch-enabled' );
 	enabled.checked = patch.enabled;
@@ -267,16 +273,122 @@ async function render() {
 	const list = el( 'patch-list' );
 	list.replaceChildren();
 	el( 'empty' ).hidden = state.patches.length > 0;
+	el( 'stack-cycle' ).hidden = !state.stack.cycle;
 
-	for ( const patch of state.patches ) {
+	// Show the patches in the order they run, which the dependencies decide.
+	const inOrder = state.stack.order
+		.map( ( key ) => state.patches.find( ( p ) => p.key === key ) )
+		.filter( Boolean );
+	lastState = state;
+	for ( const patch of inOrder ) {
 		let payload = null;
 		try {
 			payload = ( await send( MSG.GET_PATCH_PAYLOAD, { key: patch.key } ) ).payload;
 		} catch ( e ) {
 			// A network problem must not empty the list.
 		}
-		list.append( renderPatch( patch, payload, report ) );
+		list.append( renderPatch( patch, payload, report, state.stack.after[ patch.key ] || [] ) );
 	}
+
+	// The stack check reads Gerrit, so draw the list first and fill it in.
+	if ( lastCheck ) {
+		applyStackCheck( lastCheck );
+	}
+	if ( tab ) {
+		send( MSG.GET_STACK_CHECK, { tabId: tab.id } ).then( ( check ) => {
+			lastCheck = check;
+			applyStackCheck( check );
+		}, () => {} );
+	}
+}
+
+let lastState = null;
+let lastCheck = null;
+
+/**
+ * Show what each patch still needs, for the wiki in this tab.
+ *
+ * @param {Object} check From the worker: branch, and per-patch results.
+ */
+function applyStackCheck( check ) {
+	for ( const node of el( 'patch-list' ).querySelectorAll( '.patch' ) ) {
+		const info = check.perPatch[ node.dataset.key ];
+		const box = node.querySelector( '.needs' );
+		box.replaceChildren();
+		if ( !info ) {
+			box.hidden = true;
+			continue;
+		}
+		for ( const dep of info.deps ) {
+			if ( dep.ok && !dep.note ) {
+				continue;
+			}
+			const line = document.createElement( 'p' );
+			line.className = dep.ok ? 'need-note' : 'need-bad';
+			const what = dep.changeNumber ?
+				`${ dep.kind === 'chain' ? 'Built on' : 'Depends on' } ${ dep.changeNumber }` +
+				( dep.project && lastState && dep.project !== patchProject( node.dataset.key ) ?
+					` (${ dep.project })` : '' ) +
+				( dep.subject ? `: ${ dep.subject }` : '' ) :
+				'Depends on something Gerrit does not know';
+			const why = dep.note || ( dep.state === 'not-added' ? 'Not in the list.' : '' );
+			line.textContent = `${ what }. ${ why }`;
+			if ( !dep.ok && dep.changeNumber && dep.state !== 'abandoned' ) {
+				line.append( addButton( dep.changeNumber ) );
+			}
+			box.append( line );
+		}
+		if ( info.base && info.base.unavailable ) {
+			const line = document.createElement( 'p' );
+			line.className = 'need-note';
+			line.textContent = `Could not list the merged changes under this patch that ` +
+				`${ check.branch } lacks: Gitiles is busy. Open the popup again later.`;
+			box.append( line );
+		} else if ( info.base && info.base.count ) {
+			box.append( baseList( info.base, check.branch ) );
+		}
+		box.hidden = !box.childElementCount;
+	}
+}
+
+/** The project of a patch in the list, from the last state. */
+function patchProject( key ) {
+	const patch = lastState && lastState.patches.find( ( p ) => p.key === key );
+	return patch ? patch.project : null;
+}
+
+/**
+ * Say which merged changes this patch is built on that the wiki lacks.
+ *
+ * Most are harmless, such as translation updates, so this informs rather
+ * than blocks. The ones that matter are for the user to judge.
+ */
+function baseList( base, branch ) {
+	const details = document.createElement( 'details' );
+	const summary = document.createElement( 'summary' );
+	summary.textContent = `Built on ${ base.count }${ base.more ? '+' : '' } merged ` +
+		`change(s) that ${ branch } does not have yet.`;
+	details.append( summary );
+	const ul = document.createElement( 'ul' );
+	for ( const c of base.commits ) {
+		const li = document.createElement( 'li' );
+		li.textContent = c.subject;
+		if ( c.changeId ) {
+			li.append( addButton( c.changeId ) );
+		}
+		ul.append( li );
+	}
+	details.append( ul );
+	return details;
+}
+
+function addButton( input ) {
+	const button = document.createElement( 'button' );
+	button.type = 'button';
+	button.textContent = 'Add';
+	button.className = 'add-dependency';
+	button.dataset.input = input;
+	return button;
 }
 
 /**
@@ -363,6 +475,18 @@ el( 'patch-list' ).addEventListener( 'click', async ( ev ) => {
 	}
 	const key = item.dataset.key;
 
+	if ( ev.target.matches( '.add-dependency' ) ) {
+		ev.target.disabled = true;
+		try {
+			const { payload } = await send( MSG.ADD_PATCH, { input: ev.target.dataset.input } );
+			expanded.add( payload.key );
+			await render();
+		} catch ( e ) {
+			ev.target.disabled = false;
+			ev.target.title = e.message;
+		}
+		return;
+	}
 	if ( ev.target.matches( '.patch-expand' ) ) {
 		const body = item.querySelector( '.patch-body' );
 		body.hidden = !body.hidden;

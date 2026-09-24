@@ -132,7 +132,8 @@ export const MSG = {
 	SET_SETTING: 'set-setting',
 	GET_STYLES: 'get-styles',
 	ACK_SITE: 'ack-site',
-	GET_DIAGNOSIS: 'get-diagnosis'
+	GET_DIAGNOSIS: 'get-diagnosis',
+	GET_STACK_CHECK: 'get-stack-check'
 };
 
 

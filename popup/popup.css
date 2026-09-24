@@ -110,3 +110,13 @@ footer a { color: var( --accent ); font-size: 11px; }
 .site-status button { margin-top: 6px; cursor: pointer; }
 .site-status.ok { border-color: var( --good ); }
 .site-status.ok p { color: var( --good ); }
+
+.patch-after { color: var( --muted ); font-size: 11px; }
+
+.needs { padding: 0 8px 6px 28px; font-size: 11px; }
+.needs p { margin: 2px 0; }
+.needs .need-bad { color: var( --warn ); }
+.needs .need-note { color: var( --muted ); }
+.needs button { font-size: 11px; padding: 0 5px; margin-left: 4px; cursor: pointer; }
+.needs details { margin-top: 2px; color: var( --muted ); }
+.needs details ul { margin: 2px 0; padding-left: 14px; max-height: 140px; overflow-y: auto; }

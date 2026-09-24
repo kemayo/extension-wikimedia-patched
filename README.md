@@ -170,6 +170,29 @@ that a wiki gets as a submodule is mapped to its parent in
 its modules are the VisualEditor extension's. `build/modules.json` is read by
 the server, so a change to it is reported as needing a deploy.
 
+## Stacks and dependencies
+
+Patches run in the order Gerrit implies, not the order they were added.
+A patch goes after one it is built on — its parent revision, or an entry
+in its `/related` chain — and after any change its commit message names in
+`Depends-On:`, in any repository. Unlinked patches keep the order they
+were added in. The order matters when patches touch the same lines: out of
+order, a later patch's merge reads the earlier patch's changes as
+conflicts.
+
+The popup also says, for the wiki in the current tab, what each patch
+still needs, with an **Add** button:
+
+- a chain ancestor or `Depends-On:` target that is not in the list;
+- a merged one that is **not deployed** to this wiki's branch. Merged is
+  not enough: a change merged after the branch cut is only on master until
+  a backport or the next train. Gerrit's "included in" data and the
+  branch's backports answer this per wiki;
+- the merged history under the patch that the wiki lacks, as a list. For
+  change 1321624 on `wmf/1.47.0-wmf.20` that is 28 changes, most of them
+  translation updates, so this informs rather than blocks. Gitiles
+  supplies it, and Gitiles is rate limited hard, so it can be missing.
+
 ## When the wiki runs a different base
 
 A patch is written against master. A wiki runs a wmf branch cut some days

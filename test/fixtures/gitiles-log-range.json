@@ -1,0 +1,509 @@
+)]}'
+{
+  "log": [
+    {
+      "commit": "3b33c74c932f4cade4f500da45d3d1ee3be987d1",
+      "tree": "aaf918f84613ff1b901e1319d09560c173cf9c15",
+      "parents": [
+        "f3f1ff635f3f514cd77290080d108f7ed552e769"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Wed Sep 23 09:36:14 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Wed Sep 23 09:36:14 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: I7480c3f44e4d41745fb1b6f33caba60b8c94c061\n"
+    },
+    {
+      "commit": "f3f1ff635f3f514cd77290080d108f7ed552e769",
+      "tree": "9d1ac12bc414fa83bc87fc5eb25336f53050349f",
+      "parents": [
+        "65778baba491e1092386cb3c575a5fe562860cf8"
+      ],
+      "author": {
+        "name": "Antoine Musso",
+        "email": "hashar@free.fr",
+        "time": "Tue Sep 22 08:57:33 2026 +0200"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Tue Sep 22 16:53:18 2026 +0000"
+      },
+      "message": "build: speed up grunt by using ignore\n\nGrunt tasks takes files targets defined by pattern. It calls node-glob\nfor each pattern which does a full tree traversal then merge the lists\nand excludes the files matched by negate pattern.\n\ntyops has 9 patterns which causes a full tree traversal of 47486 files\nwhen node_modules and vendor are populated it then rejects most of them\nto end up with a set of 578 files.\n\nLooking at https://gruntjs.com/configuring-tasks#files , the built-in\n`src` passes options to the underlying node-glob and\nhttps://github.com/isaacs/minimatch. node-glob supports ignoring files\nentirely, which make it dramatically faster by reducing the number of\npatterns (and thus calls to glob) and early discarding a whole directory\ntraversal (eg .git/**).\n\nAdd common patterns (.git, node_modules...) in a shared variable so they\ncan be applied to tops, eslint and stylelint.\n\nReplace `**/docs/**` by `docs/**`.\n\nResults when running `./node_modules/.bin/grunt`:\n\n\u003d\u003d tyops \u003d\u003d\n\n578 files in 1m5.4s\n578 files in 1.9s\n\n\u003d\u003d eslint \u003d\u003d\n\n9s to 6s\n\nThe task is given `src: \u0027.\u0027` which still causes Grunt to do a full path\ntraversal, eslint however its own ignore list in .eslintignore and thus\nthe benefit is less noticeable.\n\n\u003d\u003d stylelint \u003d\u003d\n\n94 files in 14.8s\n94 files in 5.9s\n\nTotal time went from near 2 minutes down to 15s!\n\nBug: T438811\nChange-Id: I8f802291039467f1d8e1af8c2ec2e3a5c346868d\n"
+    },
+    {
+      "commit": "65778baba491e1092386cb3c575a5fe562860cf8",
+      "tree": "61866ea918933a15331f7d8d1b0e55a4536eddec",
+      "parents": [
+        "ecf6eb7fbeb1b8788dde16a553633c3414d6f6e3"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Tue Sep 22 09:35:47 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Tue Sep 22 09:35:47 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: Idd36f987f16dcfcbc4e5c4ab0716672d3dbe8377\n"
+    },
+    {
+      "commit": "ecf6eb7fbeb1b8788dde16a553633c3414d6f6e3",
+      "tree": "8e4785435e64b36fdcac8e60243762e2d30d2430",
+      "parents": [
+        "df9adb55b1adfe2ea54c4a9dae4230367b45176a"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Mon Sep 21 16:47:58 2026 -0500"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Mon Sep 21 22:59:28 2026 +0000"
+      },
+      "message": "EditCheckAction#select: don\u0027t show contexts on mobile unless requested\n\nNavigation via the pagination buttons was showing the context items for\nchecks related to content that had them... which was hiding the checks\nthemselves.\n\nAlter EditCheckAction#select so that on mobile it\u0027ll only trigger a\ncontext if it was requested via selectFocusRange.\n\nBug: T436140\nChange-Id: Icfe4fe3844d2fbee7f9c42417b1ec388ec9e1da8\n"
+    },
+    {
+      "commit": "df9adb55b1adfe2ea54c4a9dae4230367b45176a",
+      "tree": "e5eb277bbc9bd5a9a633e49a23ac21efa8ec72ba",
+      "parents": [
+        "c2fc6200960f6ef0f6a587a02f191906a331c5b6"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Mon Sep 21 15:48:30 2026 -0500"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Mon Sep 21 21:56:52 2026 +0000"
+      },
+      "message": "EditCheckScrollIntoViewWidget: don\u0027t touch ve.init.target after teardown\n\n`update` gets called from an intersectionobserver, and when the editor\nwas being closed it could wind up getting called one last time after\nve.init.target had already been cleaned up.\n\nFix up some other teardown code for this widget at the same time.\n\nChange-Id: Ic5c356c10a37937b21bd21835a474756d9ae5b38\n"
+    },
+    {
+      "commit": "c2fc6200960f6ef0f6a587a02f191906a331c5b6",
+      "tree": "b60d83c49c88e84493c3620457c44c5c8b0e27b5",
+      "parents": [
+        "eabc41095566fe7ae88ae2e54bb3911b224be557"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Thu Sep 17 09:49:40 2026 -0500"
+      },
+      "committer": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Mon Sep 21 15:16:51 2026 -0500"
+      },
+      "message": "TemplateDataCache: Restore behaviour lost in the ApiResponseCache move\n\nThis is a follow-up to Ic8076ab3, which replaced MWTransclusionModel\u0027s\nAPI calls and cache with a ve.init.mw.ApiReponseCache.\n\n* The API call lose `formatversion\u003d2`. The old code used\n  Target\u0027s getContentApi, which sets it. (This is the root cause of\n  several of the following issues.)\n* The transclusion dialog no longer reports that a template does not\n  exist. VE does not record missing templates, because formatversion\u003d1\u0027s\n  missing flag is an empty string, which is falsy.\n* The \"no TemplateData\" notice does not show, because isDocumented()\n  gives the wrong answer. The notemplatedata flag is also an empty\n  string, and so undocumented templates report as documented.\n* TemplateDiscovery doesn\u0027t show the favorite button on individual\n  template pages. The page id is missing from the cached response.\n* Two redirects to one template conflict. The base class stops at the\n  first mapped title. The second redirect gets no data.\n\nMinor:\n* One bad title loses the whole fetch. Promise.all rejects, so no part\n  reaches the change queue and the dialog waits forever.\n* reset() clears a property that no longer exists. Nothing declares or\n  reads templateDataApiRequests.\n* The commit deprecated a private method. markRequestAsDone has no\n  external callers.\n\nBug: T162694\nChange-Id: I803a13ec607a489a7f4aed792b63e5667ec025b5\n"
+    },
+    {
+      "commit": "eabc41095566fe7ae88ae2e54bb3911b224be557",
+      "tree": "12067f3dbfa83ccba44309ea5626858ab46de450",
+      "parents": [
+        "496acc3393fee7a88df6db4e775240ec1d42bbfc"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Thu Sep 17 21:45:02 2026 -0500"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Mon Sep 21 20:13:45 2026 +0000"
+      },
+      "message": "dm.MWTransclusionModel: Keep a substituted transclusion on insert\n\nThe parser expands a {{subst:...}} transclusion, so the rendering is\nthe expanded template. An import of that rendering replaced the\ntransclusion node, and the magic word was lost. The result changed\nwith the shape of the expansion, which made the behavior look random.\n\nKeep the transclusion node for these transclusions. The rendering goes\nto the store as before, so the node shows the expansion.\n\nAssisted-by: Claude Opus 5\nBug: T438140\nChange-Id: I897fb7ad440dd84c32f574ee834e7ef865db79ab\n"
+    },
+    {
+      "commit": "496acc3393fee7a88df6db4e775240ec1d42bbfc",
+      "tree": "1bec945befd2f85fc017effb67335c212f8bfab1",
+      "parents": [
+        "02b2bfc39d00d803ca18f701513f8ae05b9c3dad"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Mon Sep 21 14:52:34 2026 -0500"
+      },
+      "committer": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Mon Sep 21 14:52:34 2026 -0500"
+      },
+      "message": "LLMPasteCheck: minor copy update\n\nAdd \"which is usually \u0027\u0027not\u0027\u0027 allowed\" to the description.\n\nBug: T438521\nChange-Id: I21c1924234f19f2d5205caf4ae7ab13884fb9a3b\n"
+    },
+    {
+      "commit": "02b2bfc39d00d803ca18f701513f8ae05b9c3dad",
+      "tree": "218053a66ed3ce698a71e649013cd1caf3849449",
+      "parents": [
+        "dd9d86d3c1cd5defec7977d59f2807fa0e405375"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Fri Sep 18 16:56:13 2026 -0500"
+      },
+      "committer": {
+        "name": "DLynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Mon Sep 21 16:42:25 2026 +0000"
+      },
+      "message": "EditCheck: Add a hidden tag for LLM pastes\n\nTag edits that publish content pastedetectors thinks was pasted from an\nLLM. This is regardless of whether there paste check was shown.\n\nBug: T420258\nChange-Id: I5ed9921671ab6133239c16dbefb7bf104a0b0bcf\n"
+    },
+    {
+      "commit": "dd9d86d3c1cd5defec7977d59f2807fa0e405375",
+      "tree": "d34bb04a8dd736bf725e872c74317be84f640ebd",
+      "parents": [
+        "fce3da1060e927836177caa493719947de4108f2"
+      ],
+      "author": {
+        "name": "Ed Sanders",
+        "email": "esanders@wikimedia.org",
+        "time": "Mon May 11 19:21:37 2026 +0100"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Mon Sep 21 16:23:02 2026 +0000"
+      },
+      "message": "PasteCheck: Split out a separate LLMPasteCheck\n\nPastes from LLM websites now go to a new LLMPasteCheck, and PasteCheck\nignores them. Each check then has its own configuration, messages and\ntags.\n\nBug: T420258\nChange-Id: I98e64b3cab776c2cddd66f8aabd9a7f38015c1c7\n"
+    },
+    {
+      "commit": "fce3da1060e927836177caa493719947de4108f2",
+      "tree": "56789d96d8bc7d9a987373b745abd76224eaadc6",
+      "parents": [
+        "b81a7d34366e13e159e2f5a679aa6ea421c2b98d"
+      ],
+      "author": {
+        "name": "Ed Sanders",
+        "email": "esanders@wikimedia.org",
+        "time": "Fri Jun 12 15:39:20 2026 +0100"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Mon Sep 21 16:20:04 2026 +0000"
+      },
+      "message": "EditCheck: Let actions override their name\n\nAn action can now set a name in its config. The name replaces the\ncheck name in the logging and in the seen/shown/used state. This is\nthe same mechanism as the getName() overrides in textMatch and in\nLLM suggestions.\n\nMark duplicateLink\u0027s adjacent mode for separate logging.\n\nChange-Id: I40cd101c2df0b5fb9f76058994d1ab3b9b37dd6a\n"
+    },
+    {
+      "commit": "b81a7d34366e13e159e2f5a679aa6ea421c2b98d",
+      "tree": "4d61eff24ca67c7198bb44c6f0a5e0674892a1e8",
+      "parents": [
+        "60b88e4a6a8e366e1279e63b945d56fd366eba8e"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Mon Sep 21 09:36:24 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Mon Sep 21 09:36:24 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: I987d15a41b928939642fd519badbc67534e43e56\n"
+    },
+    {
+      "commit": "60b88e4a6a8e366e1279e63b945d56fd366eba8e",
+      "tree": "8bbb91a035a64fccb7cf99d2935c27051c2610a7",
+      "parents": [
+        "747e1397619e078f93f61167a0f5886f54599abc"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Wed Apr 08 10:59:56 2026 -0500"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Fri Sep 18 21:24:58 2026 +0000"
+      },
+      "message": "Edit check: make namespaces configurable\n\nCreates a new config value: `extraNamespaces` which is an object keyed\nwith namespace-names (case-insensitive, spaces or underscores). The\nschema is set up to allow the value to be a boolean or config overrides,\nbut the config overrides are not yet actually supported so if they\u0027re\nused they\u0027ll just count as \"true\" for enabling purposes.\n\nThe main namespace cannot be disabled for checks via this mechanism, but\nit would be easy to make this possible if we wanted to later.\n\nBug: T400506\nChange-Id: I314433a3d701de7d3f4dfb9265419e7545b536a9\n"
+    },
+    {
+      "commit": "747e1397619e078f93f61167a0f5886f54599abc",
+      "tree": "767d5d49c59c246be137f7a52f58b8be39df6f4a",
+      "parents": [
+        "105c6bf04ab580ea8eed6dccda832d3ca49eff29"
+      ],
+      "author": {
+        "name": "Fomafix",
+        "email": "fomafix@googlemail.com",
+        "time": "Wed Sep 16 18:37:45 2026 +0000"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Fri Sep 18 12:01:07 2026 +0000"
+      },
+      "message": "Add parameter $envOptions to newHtmlInputTransformHelper()\n\nThis change is necessary for the core change\nIa4fe6bb191de4b75fab8352477523a85da7588da, because here the parameter\n$page becomes mandatory and the parameter $envOptions must also be\nmandatory because it is not allowed to have an mandatory parameter\nafter an optional parameter.\n\nChange-Id: I0e24d0b62c2fb0fe618acfe8c1b924b79ed627cc\n"
+    },
+    {
+      "commit": "105c6bf04ab580ea8eed6dccda832d3ca49eff29",
+      "tree": "9a096ae90795aaf088ecca4bc2699e207b83da59",
+      "parents": [
+        "c59b909bc61aae55dc0ef5ab64ea254740ad44ae"
+      ],
+      "author": {
+        "name": "WMDE-Fisch",
+        "email": "christoph.jauera@wikimedia.de",
+        "time": "Fri Sep 18 11:11:02 2026 +0200"
+      },
+      "committer": {
+        "name": "WMDE-Fisch",
+        "email": "christoph.jauera@wikimedia.de",
+        "time": "Fri Sep 18 11:11:02 2026 +0200"
+      },
+      "message": "Update VE core submodule to master (1777e5a31)\n\nNew changes:\n1777e5a31 getUniqueListKey to return new names for a listKey when the prefix changed\n\nLocalisation Updates:\nf03940f38\n\nBug: T436391\nChange-Id: I981f9cb203e6bbea83393c008412c8df9042ac05\n"
+    },
+    {
+      "commit": "c59b909bc61aae55dc0ef5ab64ea254740ad44ae",
+      "tree": "2f2c52c42f488f3c04751c4b7d7c06f213390bff",
+      "parents": [
+        "0bb3e664ffdcd2f6da6f13e6550d2acef8a90b8e"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Fri Sep 18 09:36:00 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Fri Sep 18 09:36:00 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: I71f3b9b6816a40dbf8fd0a1d09850ad0ab587df9\n"
+    },
+    {
+      "commit": "0bb3e664ffdcd2f6da6f13e6550d2acef8a90b8e",
+      "tree": "5f8e7bb3fc98362a47a852175df66407a9270ed8",
+      "parents": [
+        "b6ed1490b300ff8cfd100586991eafb90607ca17"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Thu Sep 17 15:47:45 2026 -0500"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Thu Sep 17 23:16:59 2026 +0000"
+      },
+      "message": "LLMSuggestionsEditCheck: avoid potential stall in fetchSuggestions\n\nChange-Id: Ida9061196ec8cdc9ef1f2423cfd1d1f81bb8edda\n"
+    },
+    {
+      "commit": "b6ed1490b300ff8cfd100586991eafb90607ca17",
+      "tree": "448cc0ee1dfc7aa8ded1b60445539651e22b591f",
+      "parents": [
+        "f6f245917715e0f036df1e1f91c992c884375c96"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Thu Sep 17 17:57:58 2026 -0500"
+      },
+      "committer": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Thu Sep 17 17:57:58 2026 -0500"
+      },
+      "message": "mw.DesktopArticleTarget: if source education is enabled suppress welcome\n\nBug: T434249\nChange-Id: Idfa9c8077b782f8d2a4f2408e42966e5d7c09db1\n"
+    },
+    {
+      "commit": "f6f245917715e0f036df1e1f91c992c884375c96",
+      "tree": "7074f81efb6addd44f7e25433fd7de5ec2411a79",
+      "parents": [
+        "7f57d22ea98255891a71e95ca69820ec595b0908"
+      ],
+      "author": {
+        "name": "WMDE-Fisch",
+        "email": "christoph.jauera@wikimedia.de",
+        "time": "Thu Sep 17 13:08:30 2026 +0200"
+      },
+      "committer": {
+        "name": "WMDE-Fisch",
+        "email": "christoph.jauera@wikimedia.de",
+        "time": "Thu Sep 17 13:08:30 2026 +0200"
+      },
+      "message": "Remove obsolete abortAllApiRequests call in TemplateDialog\n\nThis method got obsolete and deprecated in\nIc8076ab3c2064f3d3a0cc59ce53959479c5d92aa\n\nChange-Id: I7b792c309d839d0170a034eec90d499be4dfb004\n"
+    },
+    {
+      "commit": "7f57d22ea98255891a71e95ca69820ec595b0908",
+      "tree": "8aa16a8b3adf02fbcf93aad72d20690981e55d4e",
+      "parents": [
+        "c50ae7302fb91a5960c97b11e7c8d2d202bf8bdd"
+      ],
+      "author": {
+        "name": "Fomafix",
+        "email": "fomafix@googlemail.com",
+        "time": "Wed Sep 16 20:28:26 2026 +0000"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Thu Sep 17 10:02:56 2026 +0000"
+      },
+      "message": "Use injected service MainConfig\n\nChange-Id: Ic46571d2aabbea087fe0ad7140b602594de6245c\n"
+    },
+    {
+      "commit": "c50ae7302fb91a5960c97b11e7c8d2d202bf8bdd",
+      "tree": "8bf9702e17194f929085ac80b01b9c999baf0c59",
+      "parents": [
+        "a5b2e4d0d938c9ee93dd519cb7abe5a2535e41bf"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Thu Sep 17 09:37:22 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Thu Sep 17 09:37:22 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: I45b35a2532e9977a064367f17f5dd4e48915d7be\n"
+    },
+    {
+      "commit": "a5b2e4d0d938c9ee93dd519cb7abe5a2535e41bf",
+      "tree": "c9d054c7e7fcbf41bda137a03e47dfc4f14bee42",
+      "parents": [
+        "dbbf1f82799f32b0a81fa3ee36323055afa61e34"
+      ],
+      "author": {
+        "name": "Caro Medelius",
+        "email": "cmedelius@wikimedia.org",
+        "time": "Mon Sep 14 17:46:38 2026 -0700"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Thu Sep 17 06:25:16 2026 +0000"
+      },
+      "message": "enwiki desktop VE: add education popup for switching to source editor\n\nUpdate UX so that newcomers can easily discover source editing on\nenwiki, after enwiki changes to VE as default.\n\nBug: T434249\nChange-Id: I2146c9c317634208f0bf39c25aa03e7008da0367\n"
+    },
+    {
+      "commit": "dbbf1f82799f32b0a81fa3ee36323055afa61e34",
+      "tree": "d2c06ac78d8a956f8126a3bde289d201e97eb234",
+      "parents": [
+        "8674546aabb2b299c0f5ec1af31f151ab4e1d30c"
+      ],
+      "author": {
+        "name": "Caro Medelius",
+        "email": "cmedelius@wikimedia.org",
+        "time": "Tue Aug 25 08:58:28 2026 -0700"
+      },
+      "committer": {
+        "name": "jenkins-bot",
+        "email": "jenkins-bot@gerrit.wikimedia.org",
+        "time": "Thu Sep 17 01:48:03 2026 +0000"
+      },
+      "message": "Update design for experimental edit check cards\n\nFor experimental edit checks, add dashed lightbulb icon, new subheading,\nand a new link in the card dropdown.\n\nOn mobile, this will show the dashed icon in the gutter only when all\nchecks/suggestions in the section are experimental.\n\nBug: T432155\nChange-Id: Ief3f3cad3509dc8c4de13a5cc0aaf3c1a9f2cee7\n"
+    },
+    {
+      "commit": "8674546aabb2b299c0f5ec1af31f151ab4e1d30c",
+      "tree": "6ad8ec6d25379667f7ca9dd397b7ea4aff140700",
+      "parents": [
+        "8879dd3e8f13b7c37aa02f0f8fc8671a4e82f38a"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Wed Sep 16 17:02:13 2026 -0500"
+      },
+      "committer": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Wed Sep 16 17:02:13 2026 -0500"
+      },
+      "message": "Update VE core submodule to master (26216c0d7)\n\nNew changes:\nb811a944a tests: fix some platform issues causing failures on macOS\naed9041bc tests: fix clipboard test failures in Firefox and Safari\n62c3befcd tests: do not assert the selection after tab moves the focus\nbc65aa399 ui.CompletionWidget: hide the entire menu on teardown not just the popup\nc77eb8b7f tests: fix ClipboardHandler blank-line normalization for Safari \u003cpre\u003e\n26216c0d7 LinearData getAnnotationRanges: merge contiguous ranges of the same hash\n\nBug: T437749\nBug: T438070\nChange-Id: Ia80b65595b82c6474e4e022b49a2a69a9dbd069e\n"
+    },
+    {
+      "commit": "8879dd3e8f13b7c37aa02f0f8fc8671a4e82f38a",
+      "tree": "dba00c0f85fcee467266d3284d4d16345999621a",
+      "parents": [
+        "030120e0b9ce6b966d7102aff018415eb8040eac"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Wed Sep 16 09:36:40 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Wed Sep 16 09:36:40 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: Iad949a555a041377153ad5f6b3cdbeb0a4e30d46\n"
+    },
+    {
+      "commit": "030120e0b9ce6b966d7102aff018415eb8040eac",
+      "tree": "8791d6f284ec531e8c7b4408eccc09a3a11f890f",
+      "parents": [
+        "ba9e165a85e9dfddec09a71befdfc28e8876c0fb"
+      ],
+      "author": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Tue Sep 15 15:37:04 2026 -0500"
+      },
+      "committer": {
+        "name": "David Lynch",
+        "email": "dlynch@wikimedia.org",
+        "time": "Tue Sep 15 15:58:48 2026 -0500"
+      },
+      "message": "DuplicateLinkEditCheck: fix merging links in complex annotations\n\nThis change spreads annotations covering both ends of the adjacent link\nranges across the intervening space. If this cannot be done, we just\ndon\u0027t show the suggestion.\n\nSimplified real example: `\u0027\u0027A, [[B]]\u0027\u0027 [[B|\u0027\u0027B2\u0027\u0027]]\u0027\u0027, \u0027\u0027C` would offer a\nmerge, but not do anything.\n\nThe merge *did* clear the range, and then set a single link annotation\nover the whole range. However, because of the incompletely-covering\nitalics, when we reserialized the document to save we\u0027d have to close\nout the `\u003ci\u003e` and the `\u003ca\u003e`... and then `trimWhitespace` would mean\nwe\u0027d remove that space between words from the second opening `\u003ca\u003e`.\nThus we\u0027d reproduce the original duplicate-linked version of the\nwikitext.\n\nThis would result in `\u0027\u0027A, [[B|B B2]], \u0027\u0027C` for the above example.\n\nBug: T437749\nChange-Id: I9a61b515e05ac326bfef045ab4b01eda7a655c48\n"
+    },
+    {
+      "commit": "ba9e165a85e9dfddec09a71befdfc28e8876c0fb",
+      "tree": "330705066da52f9e09d291220afac63b65140353",
+      "parents": [
+        "f4ae918ab023ad21deccca1351988cfbd8762d23"
+      ],
+      "author": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Tue Sep 15 12:15:13 2026 +0200"
+      },
+      "committer": {
+        "name": "Translation updater bot",
+        "email": "l10n-bot@translatewiki.net",
+        "time": "Tue Sep 15 12:15:13 2026 +0200"
+      },
+      "message": "Localisation updates from https://translatewiki.net.\n\nChange-Id: I87ddeec707d5875c7eeb0186d90bf41799ef81a7\n"
+    },
+    {
+      "commit": "f4ae918ab023ad21deccca1351988cfbd8762d23",
+      "tree": "667ead87843e0b1ef182e2a726f88f28bc502319",
+      "parents": [
+        "a6a4e023321273dea9e8055018dabd43599cb8e9"
+      ],
+      "author": {
+        "name": "libraryupgrader",
+        "email": "tools.libraryupgrader@tools.wmflabs.org",
+        "time": "Tue Sep 15 05:19:33 2026 +0000"
+      },
+      "committer": {
+        "name": "libraryupgrader",
+        "email": "tools.libraryupgrader@tools.wmflabs.org",
+        "time": "Tue Sep 15 08:22:04 2026 +0000"
+      },
+      "message": "build: Updating @wdio/mocha-framework to 9.31.9\n\nChange-Id: Icfeef7c41e8ee9fa9ea145baf193c14cfab26466\n"
+    }
+  ]
+}

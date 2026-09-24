@@ -13,6 +13,7 @@ import {
 } from './patch-model.js';
 import { modulePrefixesForProject, mountFor, installedPath } from '../shared/mw-layout.js';
 import { listDirectory } from './gitiles.js';
+import { readDependencies } from './deps.js';
 import { isPlainCss } from '../shared/less-compile.js';
 import { STATUS } from '../shared/constants.js';
 import { patchKey } from './store.js';
@@ -36,6 +37,7 @@ export async function preparePatch( ref ) {
 		patchset: revision.number,
 		sha: revision.sha,
 		parentSha,
+		changeId: change.change_id,
 		project: change.project,
 		branch: change.branch,
 		subject: change.subject,
@@ -134,6 +136,7 @@ export async function preparePatch( ref ) {
 
 	await Promise.all( jobs );
 	await attachSiblings( payload, parentSha );
+	payload.deps = await readDependencies( changeNumber, revision.sha, change );
 
 	// Sort so the popup always shows the same order.
 	const byPath = ( a, b ) => a.path.localeCompare( b.path );

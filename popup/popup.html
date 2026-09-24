@@ -31,6 +31,10 @@
 </form>
 <p id="add-error" class="error" hidden></p>
 
+<p id="stack-cycle" class="error" hidden>
+	Some patches name each other in Depends-On, so they cannot all go in
+	order. They run in the order they were added.
+</p>
 <ul id="patch-list"></ul>
 <p id="empty" class="note">No patches yet. Add a Gerrit change above.</p>
 
@@ -49,6 +53,7 @@
 			<button type="button" class="patch-expand" title="Show files">&#9656;</button>
 			<button type="button" class="patch-remove" title="Remove">&times;</button>
 		</div>
+		<div class="needs" hidden></div>
 		<div class="patch-body" hidden>
 			<label class="review">
 				<input type="checkbox" class="patch-reviewed">

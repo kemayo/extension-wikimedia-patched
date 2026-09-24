@@ -22,6 +22,10 @@ import {
 } from './debug-mode.js';
 import { setTabStatus, getTabStatus, watchTabs, paintBadge } from './tab-state.js';
 import { badgeFor } from './badge.js';
+import { stackOrder, dependencyReport } from '../shared/stack-order.js';
+import { deployedOn, undeployedBase } from './deps.js';
+import { branchExists } from './repo-files.js';
+import { deployBranch } from '../shared/mw-layout.js';
 
 /** Turn a match pattern into a host test. */
 function matchToRegExp( pattern ) {
@@ -79,6 +83,10 @@ async function handleAddPatch( input ) {
 		subject: payload.subject,
 		owner: payload.owner,
 		changeStatus: payload.status,
+		sha: payload.sha,
+		parentSha: payload.parentSha,
+		changeId: payload.changeId,
+		deps: payload.deps,
 		// The user must look at the code before it runs on a wiki.
 		reviewed: false,
 		enabled: false,
@@ -98,6 +106,10 @@ async function handleRefreshPatch( key ) {
 		type: 'number', id: patch.changeNumber, patchset: patch.patchset
 	} );
 	await store.setCachedPayload( key, payload );
+	// A chain or a Depends-On footer can change when the patch is read again.
+	await store.updatePatch( key, {
+		parentSha: payload.parentSha, changeId: payload.changeId, deps: payload.deps
+	} );
 	return payload;
 }
 
@@ -121,7 +133,11 @@ async function buildPagePayload( origin ) {
 		return { active: false, reason: 'production-not-acknowledged', patches: [] };
 	}
 
-	const patches = ( await store.getPatches() ).filter( ( p ) => p.enabled && p.reviewed );
+	const ready = ( await store.getPatches() ).filter( ( p ) => p.enabled && p.reviewed );
+	// A patch built on another must run after it, or its merge reads the
+	// other patch's changes as conflicts.
+	const { order } = stackOrder( ready );
+	const patches = order.map( ( key ) => ready.find( ( p ) => p.key === key ) );
 	const payloads = [];
 	for ( const patch of patches ) {
 		let payload = await store.getCachedPayload( patch.key );
@@ -224,6 +240,55 @@ async function warmDeployed( version ) {
 	} ) );
 }
 
+/**
+ * Check every patch's needs against the wiki in one tab.
+ *
+ * Merged is not the same as deployed, so every merged dependency, and the
+ * merged history under each patch, is checked against the branch that
+ * wiki runs. This reads Gerrit and Gitiles, so the popup asks for it after
+ * it has drawn the list, and never the page.
+ *
+ * @param {number} tabId
+ * @return {Promise<Object>}
+ */
+async function checkStack( tabId ) {
+	let origin = null;
+	try {
+		origin = new URL( ( await ext.tabs.get( tabId ) ).url ).origin;
+	} catch ( e ) {}
+	const version = origin && versionFor( origin );
+	const branch = deployBranch( version );
+	const patches = await store.getPatches();
+	const perPatch = {};
+
+	await Promise.all( patches.map( async ( patch ) => {
+		const merged = [
+			...( ( patch.deps && patch.deps.ancestors ) || [] ),
+			...( ( patch.deps && patch.deps.dependsOn ) || [] )
+		].filter( ( d ) => d.status === 'MERGED' && d.changeNumber );
+		const deployed = {};
+		if ( branch ) {
+			await Promise.all( merged.map( async ( d ) => {
+				deployed[ d.changeNumber ] = await deployedOn(
+					{ changeNumber: d.changeNumber, changeId: d.changeId,
+						project: d.project || patch.project }, branch );
+			} ) );
+		}
+
+		let base = null;
+		if ( branch && patch.parentSha && await branchExists( patch.project, branch ) ) {
+			const range = await undeployedBase( patch.project, patch.parentSha, branch );
+			base = range ? {
+				count: range.commits.length, more: range.more,
+				commits: range.commits.slice( 0, 50 )
+			} : { unavailable: true };
+		}
+		perPatch[ patch.key ] = { deps: dependencyReport( patch, patches, deployed ), base };
+	} ) );
+
+	return { origin, version, branch, perPatch };
+}
+
 /** Compiled stylesheets, keyed by patch, skin and wiki version. */
 const styleCache = new Map();
 
@@ -289,11 +354,17 @@ const CHANGES_BADGES = new Set( [
 /** Handle one message. Split out so the listener can stay small. */
 async function dispatch( msg, sender ) {
 	switch ( msg.type ) {
-		case MSG.GET_STATE:
+		case MSG.GET_STATE: {
+			const patches = await store.getPatches();
 			return {
 				enabled: await store.isEnabled(),
-				patches: await store.getPatches()
+				patches,
+				stack: stackOrder( patches )
 			};
+		}
+
+		case MSG.GET_STACK_CHECK:
+			return await checkStack( msg.tabId );
 
 		case MSG.SET_ENABLED: {
 			await store.setEnabled( msg.value );

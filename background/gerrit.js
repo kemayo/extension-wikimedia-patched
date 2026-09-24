@@ -124,12 +124,16 @@ export async function resolveChangeNumber( ref ) {
 	if ( !results.length ) {
 		throw new GerritError( `No change matches ${ ref.id }`, 404 );
 	}
-	if ( results.length > 1 ) {
+	// A Change-Id is shared by a change and its backports. Mean the one on
+	// master, and only give up if that is still not one change.
+	const onMaster = results.filter( ( c ) => c.branch === 'master' );
+	const pool = onMaster.length ? onMaster : results;
+	if ( pool.length > 1 ) {
 		throw new GerritError(
-			`${ ref.id } matches ${ results.length } changes. Use the change number instead.`, 409
+			`${ ref.id } matches ${ pool.length } changes. Use the change number instead.`, 409
 		);
 	}
-	return String( results[ 0 ]._number );
+	return String( pool[ 0 ]._number );
 }
 
 /**
@@ -232,6 +236,16 @@ export function decodeBase64Utf8( base64 ) {
 		bytes[ i ] = binary.charCodeAt( i );
 	}
 	return new TextDecoder( 'utf-8' ).decode( bytes );
+}
+
+/**
+ * Read any Gerrit REST path that is already built from validated parts.
+ *
+ * @param {string} path Relative to /r/, with any query string.
+ * @return {Promise<*>}
+ */
+export function gerritGet( path ) {
+	return request( `${ GERRIT_BASE }/${ path }` );
 }
 
 export { GerritError };
