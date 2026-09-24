@@ -155,6 +155,8 @@ async function copyModuleTree( from, to, rewrite ) {
 
 async function vendorLess() {
 	const lib = join( ROOT, 'node_modules/less/lib/less' );
+	// vendor/ is generated, so a fresh clone does not have it.
+	await mkdir( join( ROOT, 'vendor' ), { recursive: true } );
 	try {
 		await readFile( join( lib, 'index.js' ), 'utf8' );
 	} catch ( e ) {
