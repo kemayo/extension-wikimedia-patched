@@ -114,6 +114,19 @@ else still works.
 - **Firefox**: `about:debugging#/runtime/this-firefox` -> Load Temporary
   Add-on -> `dist/firefox/manifest.json`.
 
+## Releasing
+
+Push a tag such as `v0.2.0`. The release workflow
+(`.github/workflows/release.yml`) tests, builds, and publishes a GitHub
+release with a zip for each browser. The version in both manifests comes
+from the tag, so it does not have to match `package.json`, though the
+workflow warns when it does not.
+
+Release Firefox installs only signed add-ons. To have the workflow sign an
+XPI through AMO's unlisted channel, add your AMO API key as the repository
+secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. Without them the release has
+the Firefox zip only, which loads as a temporary add-on.
+
 ## How it works
 
 ResourceLoader delivers a module as `mw.loader.impl(declarator)`, where

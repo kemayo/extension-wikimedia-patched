@@ -17,7 +17,17 @@ import {
 
 const ROOT = dirname( fileURLToPath( import.meta.url ) );
 const DIST = join( ROOT, 'dist' );
-const VERSION = '0.1.0';
+/**
+ * The version in the manifest. A release sets WMP_VERSION from its tag;
+ * otherwise package.json says. Chrome allows one to four numbers of up to
+ * 65535, joined by dots, and refuses anything else, so check it here.
+ */
+const VERSION = process.env.WMP_VERSION ||
+	JSON.parse( await readFile( join( ROOT, 'package.json' ), 'utf8' ) ).version;
+if ( !/^\d+(\.\d+){0,3}$/.test( VERSION ) ||
+	VERSION.split( '.' ).some( ( n ) => Number( n ) > 65535 ) ) {
+	throw new Error( `"${ VERSION }" is not a version a browser accepts, such as 1.2.3.` );
+}
 const BUILD_ID = new Date().toISOString();
 
 const SOURCE_DIRS = [ 'background', 'content', 'shared', 'popup', 'options', 'icons', 'vendor' ];

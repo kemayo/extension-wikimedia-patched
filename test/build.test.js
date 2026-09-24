@@ -12,3 +12,12 @@ test( 'each build is stamped, so the popup can spot an old worker', () => {
 		'both browsers come from one build' );
 	assert.equal( idIn( 'shared/constants.js' ), 'dev', 'the source is not changed' );
 } );
+
+test( 'the manifest version is the package version, in both browsers', () => {
+	// A release overrides it with WMP_VERSION, from the tag.
+	const pkg = JSON.parse( readFileSync( 'package.json', 'utf8' ) ).version;
+	for ( const browser of [ 'chrome', 'firefox' ] ) {
+		const manifest = JSON.parse( readFileSync( `dist/${ browser }/manifest.json`, 'utf8' ) );
+		assert.equal( manifest.version, process.env.WMP_VERSION || pkg, browser );
+	}
+} );

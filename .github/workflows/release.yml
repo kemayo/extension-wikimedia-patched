@@ -1,0 +1,91 @@
+# Build a release when a version tag is pushed, such as v1.2.3.
+#
+# The release holds a zip for each browser. If the AMO API keys are set as
+# repository secrets (AMO_JWT_ISSUER and AMO_JWT_SECRET), it also holds a
+# signed Firefox XPI: release Firefox refuses an unsigned add-on. The
+# signing uses the unlisted channel, so the add-on is not on the AMO site.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not v and a version, such as v1.2.3."
+            exit 1
+          fi
+          package="$(node -p 'require("./package.json").version')"
+          if [ "$version" != "$package" ]; then
+            echo "::warning::Tag says $version but package.json says $package. The release uses $version."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Installs less, which the build bundles into the extension.
+      - run: npm ci
+
+      # npm test builds first, so this is the build that ships.
+      - name: Build and test
+        env:
+          WMP_VERSION: ${{ steps.version.outputs.version }}
+        run: npm test
+
+      - name: Check that the LESS compiler is in the build
+        run: |
+          if ! grep -q "lessFactory" dist/chrome/vendor/less.js; then
+            echo "::error::The build has the placeholder, not the LESS compiler."
+            exit 1
+          fi
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir release
+          ( cd dist/chrome && zip -r -X "../../release/wikimedia-patched-chrome-$VERSION.zip" . )
+          ( cd dist/firefox && zip -r -X "../../release/wikimedia-patched-firefox-$VERSION.zip" . )
+
+      - name: Sign for Firefox
+        if: env.AMO_JWT_ISSUER != '' && env.AMO_JWT_SECRET != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          npx --yes web-ext@8 sign \
+            --source-dir dist/firefox \
+            --channel unlisted \
+            --api-key "$AMO_JWT_ISSUER" \
+            --api-secret "$AMO_JWT_SECRET" \
+            --artifacts-dir web-ext-artifacts
+          cp web-ext-artifacts/*.xpi "release/wikimedia-patched-firefox-$VERSION.xpi"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "WikimediaPatched $VERSION" \
+            --generate-notes \
+            --verify-tag
