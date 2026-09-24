@@ -39,6 +39,24 @@ ul.origins li { padding: 3px 0; }
 
 <h2>Debug mode</h2>
 <p class="note">
+	Debug mode lets the extension compare the code a wiki runs against the code
+	the patch was written for. Without it a patch still applies, but the popup
+	cannot tell you when the base does not match.
+</p>
+<ul class="origins">
+	<li><label>
+		<input type="radio" name="debug-strategy" value="cookie">
+		Cookie for the whole site (tested)
+	</label></li>
+	<li><label>
+		<input type="radio" name="debug-strategy" value="request">
+		Rewrite the startup request, one tab at a time (not yet checked in a
+		real browser)
+	</label></li>
+</ul>
+
+<h2>Stuck cookie</h2>
+<p class="note">
 	The extension turns on ResourceLoader debug mode so it can compare the live
 	code against the patch base. Debug mode makes a wiki much slower. If a wiki
 	stays slow after you turn the extension off, clear the cookie here.

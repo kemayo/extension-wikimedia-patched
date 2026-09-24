@@ -2,12 +2,33 @@
  * Options: grant production wikis, and clear a stuck debug cookie.
  */
 
-import { PROD_WIKI_MATCHES } from '../shared/constants.js';
+import { ext } from '../shared/webext.js';
+import { MSG, PROD_WIKI_MATCHES } from '../shared/constants.js';
 
 const list = document.getElementById( 'origins' );
 
+async function send( type, extra = {} ) {
+	const reply = await ext.runtime.sendMessage( { type, ...extra } );
+	if ( !reply || !reply.ok ) {
+		throw new Error( reply ? reply.error : 'The background worker did not answer.' );
+	}
+	return reply.result;
+}
+
+async function renderStrategy() {
+	const { settings } = await send( MSG.GET_SETTINGS );
+	for ( const input of document.querySelectorAll( 'input[name="debug-strategy"]' ) ) {
+		input.checked = input.value === settings.debugStrategy;
+		input.addEventListener( 'change', () => {
+			if ( input.checked ) {
+				send( MSG.SET_SETTING, { key: 'debugStrategy', value: input.value } );
+			}
+		} );
+	}
+}
+
 async function render() {
-	const granted = await chrome.permissions.getAll();
+	const granted = await ext.permissions.getAll();
 	const have = new Set( granted.origins || [] );
 	list.replaceChildren();
 
@@ -30,19 +51,19 @@ list.addEventListener( 'change', async ( ev ) => {
 		return;
 	}
 	if ( ev.target.checked ) {
-		const ok = await chrome.permissions.request( { origins: [ pattern ] } );
+		const ok = await ext.permissions.request( { origins: [ pattern ] } );
 		if ( !ok ) {
 			ev.target.checked = false;
 		}
 	} else {
-		await chrome.permissions.remove( { origins: [ pattern ] } );
+		await ext.permissions.remove( { origins: [ pattern ] } );
 	}
 	render();
 } );
 
 document.getElementById( 'clear-debug' ).addEventListener( 'click', async () => {
-	const cookies = await chrome.cookies.getAll( { name: 'resourceLoaderDebug' } );
-	await Promise.all( cookies.map( ( c ) => chrome.cookies.remove( {
+	const cookies = await ext.cookies.getAll( { name: 'resourceLoaderDebug' } );
+	await Promise.all( cookies.map( ( c ) => ext.cookies.remove( {
 		url: ( c.secure ? 'https://' : 'http://' ) + c.domain.replace( /^\./, '' ) + c.path,
 		name: 'resourceLoaderDebug'
 	} ).catch( () => {} ) ) );
@@ -51,3 +72,4 @@ document.getElementById( 'clear-debug' ).addEventListener( 'click', async () => 
 } );
 
 render();
+renderStrategy();

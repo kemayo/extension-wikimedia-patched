@@ -123,5 +123,7 @@ export const MSG = {
 	GET_PAYLOAD: 'get-payload',
 	REPORT_STATUS: 'report-status',
 	GET_TAB_STATUS: 'get-tab-status',
-	ACK_ELEVATED: 'ack-elevated'
+	ACK_ELEVATED: 'ack-elevated',
+	GET_SETTINGS: 'get-settings',
+	SET_SETTING: 'set-setting'
 };

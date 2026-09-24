@@ -2,6 +2,7 @@
  * Popup: the switch, the patch list, and what each patch did on this tab.
  */
 
+import { ext } from '../shared/webext.js';
 import { MSG, STATUS, GERRIT_BASE } from '../shared/constants.js';
 
 const el = ( id ) => document.getElementById( id );
@@ -24,7 +25,7 @@ const STATUS_LABEL = {
 };
 
 async function send( type, extra = {} ) {
-	const reply = await chrome.runtime.sendMessage( { type, ...extra } );
+	const reply = await ext.runtime.sendMessage( { type, ...extra } );
 	if ( !reply || !reply.ok ) {
 		throw new Error( reply ? reply.error : 'The background worker did not answer.' );
 	}
@@ -33,7 +34,7 @@ async function send( type, extra = {} ) {
 
 /** The report from the page, if the content script sent one. */
 async function currentTabReport() {
-	const [ tab ] = await chrome.tabs.query( { active: true, currentWindow: true } );
+	const [ tab ] = await ext.tabs.query( { active: true, currentWindow: true } );
 	if ( !tab ) {
 		return { tab: null, report: null };
 	}
@@ -211,12 +212,12 @@ function renderElevatedWarning( report ) {
 }
 
 el( 'elevated-ack' ).addEventListener( 'click', async () => {
-	const [ tab ] = await chrome.tabs.query( { active: true, currentWindow: true } );
+	const [ tab ] = await ext.tabs.query( { active: true, currentWindow: true } );
 	if ( !tab || !tab.url ) {
 		return;
 	}
 	await send( MSG.ACK_ELEVATED, { origin: new URL( tab.url ).origin } );
-	await chrome.tabs.reload( tab.id );
+	await ext.tabs.reload( tab.id );
 	window.close();
 } );
 
@@ -286,7 +287,7 @@ el( 'patch-list' ).addEventListener( 'change', async ( ev ) => {
 
 el( 'open-options' ).addEventListener( 'click', ( ev ) => {
 	ev.preventDefault();
-	chrome.runtime.openOptionsPage();
+	ext.runtime.openOptionsPage();
 } );
 
 render();

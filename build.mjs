@@ -30,7 +30,7 @@ function baseManifest() {
 		version: VERSION,
 		description:
 			'Apply unmerged Gerrit patches to live Wikimedia wikis. Client-side code only.',
-		permissions: [ 'storage', 'cookies', 'scripting', 'tabs' ],
+		permissions: [ 'storage', 'cookies', 'scripting', 'tabs', 'webNavigation' ],
 		host_permissions: [ GERRIT_ORIGIN + '/*', ...DEV_WIKI_MATCHES ],
 		optional_host_permissions: PROD_WIKI_MATCHES,
 		icons: {

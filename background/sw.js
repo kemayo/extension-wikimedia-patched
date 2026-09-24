@@ -2,17 +2,21 @@
  * Background worker. Routes messages, talks to Gerrit, holds per-tab state.
  *
  * The worker can stop at any time, so all durable state lives in
- * chrome.storage. Only the per-tab report is in memory, and it is rebuilt on
+ * extension storage. Only the per-tab report is in memory, and it is rebuilt on
  * the next page load.
  */
 
+import { ext } from '../shared/webext.js';
 import {
 	MSG, DEV_WIKI_MATCHES, PROD_WIKI_MATCHES, NON_WIKI_MATCHES
 } from '../shared/constants.js';
 import { parsePatchRef } from './gerrit.js';
 import { preparePatch } from './prepare.js';
 import * as store from './store.js';
-import { enableDebug, disableDebug, clearAllDebugCookies } from './debug-mode.js';
+import {
+	enableDebug, disableDebug, clearAllDebugCookies,
+	enableDebugForTab, disableDebugForTab, installFirefoxRewrite
+} from './debug-mode.js';
 import { setTabStatus, getTabStatus, watchTabs } from './tab-state.js';
 
 /** Turn a match pattern into a host test. */
@@ -180,7 +184,13 @@ async function dispatch( msg, sender ) {
 			}
 			const result = await buildPagePayload( sender.origin );
 			if ( result.active ) {
-				await enableDebug( sender.origin );
+				const settings = await store.getSettings();
+				if ( settings.debugStrategy === 'cookie' ) {
+					await enableDebug( sender.origin );
+				}
+				// The request strategy arms the tab on navigation instead,
+				// because the startup script is requested before a content
+				// script can ask for anything.
 			}
 			return result;
 		}
@@ -198,12 +208,18 @@ async function dispatch( msg, sender ) {
 			await store.ackElevated( msg.origin );
 			return { ok: true };
 
+		case MSG.GET_SETTINGS:
+			return { settings: await store.getSettings() };
+
+		case MSG.SET_SETTING:
+			return { settings: await store.setSetting( msg.key, msg.value ) };
+
 		default:
 			throw new Error( 'Unknown message type: ' + msg.type );
 	}
 }
 
-chrome.runtime.onMessage.addListener( ( msg, sender, sendResponse ) => {
+ext.runtime.onMessage.addListener( ( msg, sender, sendResponse ) => {
 	dispatch( msg, sender )
 		.then( ( result ) => sendResponse( { ok: true, result } ) )
 		.catch( ( err ) => sendResponse( { ok: false, error: String( err && err.message || err ) } ) );
@@ -212,11 +228,55 @@ chrome.runtime.onMessage.addListener( ( msg, sender, sendResponse ) => {
 } );
 
 // A crash can leave the debug cookie behind. Clear it whenever we start.
-chrome.runtime.onStartup.addListener( () => {
+ext.runtime.onStartup.addListener( () => {
 	clearAllDebugCookies();
 } );
-chrome.runtime.onInstalled.addListener( () => {
+ext.runtime.onInstalled.addListener( () => {
 	clearAllDebugCookies();
+} );
+
+/**
+ * Arm a tab before it loads, when the user chose the request strategy.
+ *
+ * The startup module is requested before any content script runs, so the
+ * rule has to be in place at navigation time.
+ */
+const armedTabs = new Set();
+
+if ( ext.webNavigation && ext.webNavigation.onBeforeNavigate ) {
+	ext.webNavigation.onBeforeNavigate.addListener( async ( details ) => {
+		if ( details.frameId !== 0 ) {
+			return;
+		}
+		const origin = originOf( details.url );
+		const wanted = origin && classifyOrigin( origin ) &&
+			await store.isEnabled() &&
+			( await store.getSettings() ).debugStrategy === 'request';
+
+		if ( wanted ) {
+			armedTabs.add( details.tabId );
+			await enableDebugForTab( details.tabId );
+		} else if ( armedTabs.has( details.tabId ) ) {
+			armedTabs.delete( details.tabId );
+			await disableDebugForTab( details.tabId );
+		}
+	} );
+}
+
+function originOf( url ) {
+	try {
+		return new URL( url ).origin;
+	} catch ( e ) {
+		return null;
+	}
+}
+
+// Firefox has no query transform in declarativeNetRequest, so it redirects.
+installFirefoxRewrite( ( tabId ) => armedTabs.has( tabId ) );
+
+ext.tabs.onRemoved.addListener( ( tabId ) => {
+	armedTabs.delete( tabId );
+	disableDebugForTab( tabId );
 } );
 
 watchTabs();

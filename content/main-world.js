@@ -258,9 +258,7 @@
 			return;
 		}
 
-		const sourceUrl = `wikimedia-patched://${ patch.changeNumber }/${ file.path }`;
-		const factory = new Function( 'require', 'module', 'exports',
-			file.source + '\n//# sourceURL=' + sourceUrl + '\n' );
+		const factory = compileFile( patch, file );
 
 		// Let other files in the module require this one.
 		if ( moduleObj.script && moduleObj.script.files &&

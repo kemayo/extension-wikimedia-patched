@@ -13,6 +13,9 @@
  */
 
 ( () => {
+	// Firefox promises live on `browser`; Chrome's are on `chrome`.
+	const ext = globalThis.browser || globalThis.chrome;
+
 	const MSG_GET_PAYLOAD = 'get-payload';
 	const MSG_REPORT_STATUS = 'report-status';
 
@@ -52,7 +55,7 @@
 			document.dispatchEvent( new CustomEvent( channel + ':in', { detail } ) );
 		};
 
-		chrome.runtime.sendMessage( { type: MSG_GET_PAYLOAD } )
+		ext.runtime.sendMessage( { type: MSG_GET_PAYLOAD } )
 			.then( ( reply ) => {
 				const result = reply && reply.ok ?
 					reply.result :
@@ -67,7 +70,7 @@
 			} );
 
 		document.addEventListener( channel + ':out', ( ev ) => {
-			chrome.runtime.sendMessage( {
+			ext.runtime.sendMessage( {
 				type: MSG_REPORT_STATUS, report: ev.detail
 			} ).catch( () => {} );
 		} );

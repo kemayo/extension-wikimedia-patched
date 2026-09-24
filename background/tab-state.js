@@ -5,6 +5,7 @@
  * gets a result, and the badge shows how many landed.
  */
 
+import { ext } from '../shared/webext.js';
 import { STATUS } from '../shared/constants.js';
 
 /** Tab id to the last report from that tab. */
@@ -37,7 +38,7 @@ export function clearTabStatus( tabId ) {
 export function updateBadge( tabId ) {
 	const report = byTab.get( tabId );
 	if ( !report || !report.files || !report.files.length ) {
-		chrome.action.setBadgeText( { tabId, text: '' } ).catch( () => {} );
+		ext.action.setBadgeText( { tabId, text: '' } ).catch( () => {} );
 		return;
 	}
 	const applied = report.files.filter( ( f ) => GOOD.has( f.status ) ).length;
@@ -45,17 +46,17 @@ export function updateBadge( tabId ) {
 	const worst = report.files.some( ( f ) => BAD.has( f.status ) ) ? '#d73333' :
 		report.files.some( ( f ) => WARN.has( f.status ) ) ? '#ac6600' : '#14866d';
 
-	chrome.action.setBadgeText( { tabId, text: `${ applied }/${ total }` } ).catch( () => {} );
-	chrome.action.setBadgeBackgroundColor( { tabId, color: worst } ).catch( () => {} );
+	ext.action.setBadgeText( { tabId, text: `${ applied }/${ total }` } ).catch( () => {} );
+	ext.action.setBadgeBackgroundColor( { tabId, color: worst } ).catch( () => {} );
 }
 
 /** Forget a tab when it closes, so the map cannot grow without limit. */
 export function watchTabs() {
-	chrome.tabs.onRemoved.addListener( ( tabId ) => clearTabStatus( tabId ) );
-	chrome.tabs.onUpdated.addListener( ( tabId, info ) => {
+	ext.tabs.onRemoved.addListener( ( tabId ) => clearTabStatus( tabId ) );
+	ext.tabs.onUpdated.addListener( ( tabId, info ) => {
 		if ( info.status === 'loading' ) {
 			clearTabStatus( tabId );
-			chrome.action.setBadgeText( { tabId, text: '' } ).catch( () => {} );
+			ext.action.setBadgeText( { tabId, text: '' } ).catch( () => {} );
 		}
 	} );
 }

@@ -68,12 +68,45 @@ of the same file gives a free check: if it matches the live payload exactly,
 the replacement is certainly right. If it does not, the wiki runs a different
 base and the popup says so.
 
+## What is verified, and what is not
+
+Verified:
+
+- The wire format. `test/fixtures/editcheck-checks.debug.js` is a trimmed
+  copy of a live `en.wikipedia.org` `load.php?debug=2` response. The tests
+  assert the shape the extension depends on: verbatim source, an empty
+  version hash, and one real function per packaged file.
+- The page behaviour. `test/harness.js` is a small ResourceLoader stand-in
+  that copies the order core creates things in — `window.mw`, then
+  `mw.loader`, then `mw.loader.store`. `test/main-world.test.js` runs the
+  built content script against it and checks replacement, added files, base
+  skew, the store being off, the credential-page refusal, the elevated-rights
+  gate, and that a throwing declarator does not break the page.
+- The Gerrit pipeline. `npm run smoke` reads change 1321624 from the real
+  Gerrit and prints what the extension would do with each of its files.
+
+Not verified, because it needs a real browser:
+
+- Loading the extension at all, in either browser.
+- Whether the `resourceLoaderDebug` cookie survives the Wikimedia CDN for a
+  logged-out reader. Test on the Beta Cluster, signed in and signed out.
+- The per-tab request rewrite. It is written and can be turned on in the
+  options, but it is **off by default** until somebody checks it. The
+  ordering is the risk: the rule must land before the startup script is
+  requested.
+- Whether `world: "MAIN"` content scripts really run before the startup
+  module in Firefox. If they do not, the fallback is the
+  `<script src=moz-extension://…>` injection, which is not written yet.
+- The production permission prompt.
+
 ## Status
 
 - [x] Phase 1 — Gerrit client, patch model, storage, popup
 - [x] Phase 2 — messages, styles, new-file injection
 - [x] Phase 3 — `mw.loader.impl` wrapper, module resolver, skew reporting
-- [ ] Phase 4 — per-tab debug mode, Firefox parity, distribution
+- [~] Phase 4 — per-tab debug mode and the browser namespace shim are
+  written; browser checks, the Firefox injection fallback and distribution
+  are not done
 
 [WikimediaDebug]: https://gerrit.wikimedia.org/g/performance/WikimediaDebug
 [patchdemo]: https://patchdemo.wmcloud.org/
