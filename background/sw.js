@@ -126,7 +126,13 @@ async function buildPagePayload( origin ) {
 		}
 		payloads.push( payload );
 	}
-	return { active: payloads.length > 0, reason: null, siteKind: kind, patches: payloads };
+	return {
+		active: payloads.length > 0,
+		reason: null,
+		siteKind: kind,
+		elevatedAck: await store.hasElevatedAck( origin ),
+		patches: payloads
+	};
 }
 
 /** Handle one message. Split out so the listener can stay small. */
@@ -187,6 +193,10 @@ async function dispatch( msg, sender ) {
 
 		case MSG.GET_TAB_STATUS:
 			return { report: getTabStatus( msg.tabId ) };
+
+		case MSG.ACK_ELEVATED:
+			await store.ackElevated( msg.origin );
+			return { ok: true };
 
 		default:
 			throw new Error( 'Unknown message type: ' + msg.type );

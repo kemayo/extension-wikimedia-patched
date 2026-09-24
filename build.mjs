@@ -7,7 +7,7 @@
  * is the same, so it is copied.
  */
 
-import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -90,12 +90,44 @@ function firefoxManifest() {
 	return m;
 }
 
+/**
+ * Inline the files a content script asks for.
+ *
+ * A content script cannot be an ES module, but the pure helpers must stay
+ * importable so the unit tests can reach them. So the build pastes them in
+ * and drops the `export` keyword.
+ *
+ * @param {string} source
+ * @return {Promise<string>}
+ */
+async function inlineIncludes( source ) {
+	const lines = source.split( '\n' );
+	const out = [];
+	for ( const line of lines ) {
+		const m = /^(\s*)\/\/ @include (\S+)$/.exec( line );
+		if ( !m ) {
+			out.push( line );
+			continue;
+		}
+		const text = await readFile( join( ROOT, m[ 2 ] ), 'utf8' );
+		out.push( `${ m[ 1 ] }// --- inlined from ${ m[ 2 ] } ---` );
+		out.push( text.replace( /^export (const|function|class|let|var) /gm, '$1 ' ) );
+		out.push( `${ m[ 1 ] }// --- end ${ m[ 2 ] } ---` );
+	}
+	return out.join( '\n' );
+}
+
 async function buildOne( name, manifest ) {
 	const out = join( DIST, name );
 	await rm( out, { recursive: true, force: true } );
 	await mkdir( out, { recursive: true } );
 	for ( const dir of SOURCE_DIRS ) {
 		await cp( join( ROOT, dir ), join( out, dir ), { recursive: true } ).catch( () => {} );
+	}
+	// Content scripts cannot import, so their includes are pasted in.
+	for ( const file of [ 'content/main-world.js', 'content/bridge.js' ] ) {
+		const src = await readFile( join( ROOT, file ), 'utf8' );
+		await writeFile( join( out, file ), await inlineIncludes( src ) );
 	}
 	await writeFile(
 		join( out, 'manifest.json' ), JSON.stringify( manifest, null, '\t' ) + '\n'

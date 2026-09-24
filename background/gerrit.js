@@ -140,7 +140,7 @@ export async function resolveChangeNumber( ref ) {
  */
 export async function getChange( changeNumber ) {
 	const url = buildUrl( [ 'changes', changeNumber ] ) +
-		'?o=ALL_REVISIONS&o=DETAILED_ACCOUNTS&o=CURRENT_COMMIT';
+		'?o=ALL_REVISIONS&o=ALL_COMMITS&o=DETAILED_ACCOUNTS';
 	return request( url );
 }
 

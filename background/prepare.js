@@ -11,6 +11,7 @@ import {
 import {
 	KIND, classifyPath, isClientSide, diffMessages, diffManifest, modulePrefixesForProject
 } from './patch-model.js';
+import { listDirectory } from './gitiles.js';
 import { prepareStyle } from '../shared/less-lite.js';
 import { STATUS } from '../shared/constants.js';
 import { patchKey } from './store.js';
@@ -26,12 +27,14 @@ export async function preparePatch( ref ) {
 	const change = await getChange( changeNumber );
 	const revision = pickRevision( change, ref.patchset );
 	const files = await listFiles( changeNumber, revision.sha );
+	const parentSha = parentOf( change, revision.sha );
 
 	const payload = {
 		key: patchKey( changeNumber, revision.number ),
 		changeNumber,
 		patchset: revision.number,
 		sha: revision.sha,
+		parentSha,
 		project: change.project,
 		branch: change.branch,
 		subject: change.subject,
@@ -114,6 +117,7 @@ export async function preparePatch( ref ) {
 	} );
 
 	await Promise.all( jobs );
+	await attachSiblings( payload, parentSha );
 
 	// Sort so the popup always shows the same order.
 	const byPath = ( a, b ) => a.path.localeCompare( b.path );
@@ -178,4 +182,49 @@ function handleManifest( payload, path, parentSource, source ) {
 			`${ path }: registers ${ styleCount } stylesheet(s) and ` +
 			`${ messageCount } message(s). The extension injects these itself.` );
 	}
+}
+
+
+/**
+ * Find the commit a revision builds on.
+ *
+ * @param {Object} change ChangeInfo.
+ * @param {string} sha Revision SHA.
+ * @return {string|null}
+ */
+function parentOf( change, sha ) {
+	const commit = change.revisions && change.revisions[ sha ] && change.revisions[ sha ].commit;
+	const parents = commit && commit.parents;
+	return parents && parents.length ? parents[ 0 ].commit : null;
+}
+
+/**
+ * Record the names of each new file's siblings.
+ *
+ * A new file is in no module yet, so the extension must work out which
+ * module owns its directory. The sibling names are the evidence: the module
+ * whose file list holds them owns the directory too.
+ *
+ * The listing uses the parent commit, so the new file is not in it.
+ *
+ * @param {Object} payload
+ * @param {string|null} parentSha
+ */
+async function attachSiblings( payload, parentSha ) {
+	if ( !parentSha || !payload.newFiles.length ) {
+		return;
+	}
+	const dirs = new Set( payload.newFiles.map( ( f ) => dirname( f.path ) ) );
+	const listings = new Map();
+	await Promise.all( [ ...dirs ].map( async ( dir ) => {
+		listings.set( dir, await listDirectory( payload.project, parentSha, dir ) );
+	} ) );
+	for ( const file of payload.newFiles ) {
+		file.siblings = listings.get( dirname( file.path ) ) || [];
+	}
+}
+
+function dirname( path ) {
+	const i = path.lastIndexOf( '/' );
+	return i === -1 ? '' : path.slice( 0, i );
 }

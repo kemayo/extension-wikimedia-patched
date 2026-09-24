@@ -9,6 +9,7 @@
 const LOCAL_KEY = 'patches';
 const SESSION_ENABLED = 'enabled';
 const SESSION_PROD_ACK = 'prodAck';
+const SESSION_ELEVATED_ACK = 'elevatedAck';
 const PAYLOAD_PREFIX = 'payload:';
 
 /** Cached Gerrit content expires, so a patch is re-read now and then. */
@@ -100,4 +101,22 @@ export async function setCachedPayload( key, payload ) {
 
 export async function clearCachedPayload( key ) {
 	await chrome.storage.local.remove( PAYLOAD_PREFIX + key );
+}
+
+/**
+ * Remember that the user accepted the risk of running a patch while signed
+ * in with elevated rights. Session-scoped, like the switch.
+ *
+ * @param {string} origin
+ */
+export async function ackElevated( origin ) {
+	const got = await chrome.storage.session.get( SESSION_ELEVATED_ACK );
+	const ack = got[ SESSION_ELEVATED_ACK ] || {};
+	ack[ origin ] = Date.now();
+	await chrome.storage.session.set( { [ SESSION_ELEVATED_ACK ]: ack } );
+}
+
+export async function hasElevatedAck( origin ) {
+	const got = await chrome.storage.session.get( SESSION_ELEVATED_ACK );
+	return Boolean( ( got[ SESSION_ELEVATED_ACK ] || {} )[ origin ] );
 }

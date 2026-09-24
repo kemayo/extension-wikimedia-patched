@@ -49,24 +49,25 @@ export const NON_WIKI_MATCHES = [
 ];
 
 /**
- * Pages where an injected patch could capture credentials. The extension
- * refuses to patch them. Same-origin code can reach these pages anyway, but
- * this stops capture during a real login.
+ * Special pages where an injected patch could capture credentials. These
+ * are canonical names, as mw.config wgCanonicalSpecialPageName reports them.
+ * The extension refuses to patch them. Same-origin code can reach these
+ * pages anyway, but this stops capture during a real login.
  */
-export const BLOCKED_PAGE_TITLES = [
-	'Special:UserLogin',
-	'Special:UserLogout',
-	'Special:CreateAccount',
-	'Special:ChangeCredentials',
-	'Special:RemoveCredentials',
-	'Special:ChangeEmail',
-	'Special:ChangePassword',
-	'Special:PasswordReset',
-	'Special:Preferences',
-	'Special:BotPasswords',
-	'Special:OAuthConsumerRegistration',
-	'Special:OAuthManageMyGrants',
-	'Special:OAuthListConsumers'
+export const BLOCKED_SPECIAL_PAGES = [
+	'Userlogin',
+	'Userlogout',
+	'CreateAccount',
+	'ChangeCredentials',
+	'RemoveCredentials',
+	'ChangeEmail',
+	'ChangePassword',
+	'PasswordReset',
+	'Preferences',
+	'BotPasswords',
+	'OAuthConsumerRegistration',
+	'OAuthManageMyGrants',
+	'OAuthListConsumers'
 ];
 
 /** User groups that make an injected patch dangerous. */
@@ -103,6 +104,8 @@ export const STATUS = {
 	SERVER_SIDE: 'server-side',
 	STYLE_INJECTED: 'style-injected',
 	STYLE_SKIPPED: 'style-skipped',
+	BLOCKED_PAGE: 'blocked-page',
+	BLOCKED_ELEVATED: 'blocked-elevated',
 	CONFLICT: 'conflict',
 	TIMED_OUT: 'timed-out'
 };
@@ -119,5 +122,6 @@ export const MSG = {
 	GET_PATCH_PAYLOAD: 'get-patch-payload',
 	GET_PAYLOAD: 'get-payload',
 	REPORT_STATUS: 'report-status',
-	GET_TAB_STATUS: 'get-tab-status'
+	GET_TAB_STATUS: 'get-tab-status',
+	ACK_ELEVATED: 'ack-elevated'
 };

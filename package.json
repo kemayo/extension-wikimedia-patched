@@ -6,7 +6,7 @@
 	"description": "Apply unmerged Gerrit patches to live Wikimedia wikis.",
 	"scripts": {
 		"build": "node build.mjs",
-		"test": "node --test",
+		"test": "npm run build && node --test \"test/*.test.js\"",
 		"smoke": "node scripts/gerrit-smoke.mjs"
 	}
 }

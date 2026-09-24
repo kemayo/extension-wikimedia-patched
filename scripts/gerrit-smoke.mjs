@@ -24,7 +24,9 @@ for ( const f of payload.replaceFiles ) {
 console.log( `\nnew (${ payload.newFiles.length }):` );
 for ( const f of payload.newFiles ) {
 	console.log( `  ${ f.path }  ${ f.source.length }B` );
+	console.log( `      siblings (${ ( f.siblings || [] ).length }): ${ ( f.siblings || [] ).slice( 0, 4 ).join( ', ' ) } ...` );
 }
+console.log( `\nparent: ${ payload.parentSha }` );
 console.log( `\nstyles (${ payload.styles.length }):` );
 for ( const s of payload.styles ) {
 	console.log( `  ${ s.path }  ${ s.css.length }B` );

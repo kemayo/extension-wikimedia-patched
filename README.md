@@ -13,9 +13,10 @@ the one thing [patchdemo] cannot give you.
 
 It can apply:
 
-- JavaScript files in a ResourceLoader module
+- New JavaScript files added to a ResourceLoader module
 - English messages from `i18n/en.json`
-- Stylesheets, once the LESS compiler lands
+- Plain CSS, and LESS that needs no compiler
+- Changes to existing JavaScript files, once phase 3 lands
 
 It can never apply PHP, hooks, schema changes, API changes or new module
 registrations. Those need a real deploy. Use [patchdemo] for those. The popup
@@ -69,7 +70,7 @@ base and the popup says so.
 ## Status
 
 - [x] Phase 1 — Gerrit client, patch model, storage, popup
-- [ ] Phase 2 — messages, styles, new-file injection
+- [x] Phase 2 — messages, styles, new-file injection
 - [ ] Phase 3 — `mw.loader.impl` wrapper, module resolver, skew reporting
 - [ ] Phase 4 — per-tab debug mode, Firefox parity, distribution
 

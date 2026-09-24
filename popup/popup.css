@@ -86,3 +86,13 @@ td.reason { color: var( --muted ); }
 
 footer { margin-top: 10px; text-align: right; }
 footer a { color: var( --accent ); font-size: 11px; }
+
+.danger-inline {
+	border: 1px solid var( --bad );
+	border-radius: 2px;
+	padding: 8px;
+	margin: 8px 0;
+}
+
+.danger-inline p { margin: 0 0 6px; color: var( --bad ); }
+.danger-inline button { cursor: pointer; }

@@ -18,7 +18,9 @@ const STATUS_LABEL = {
 	[ STATUS.NOT_ON_PAGE ]: [ 'not on page', 's-skip' ],
 	[ STATUS.SERVER_SIDE ]: [ 'server-side', 's-skip' ],
 	[ STATUS.CONFLICT ]: [ 'conflict', 's-bad' ],
-	[ STATUS.TIMED_OUT ]: [ 'timed out', 's-bad' ]
+	[ STATUS.TIMED_OUT ]: [ 'timed out', 's-bad' ],
+	[ STATUS.BLOCKED_PAGE ]: [ 'blocked here', 's-bad' ],
+	[ STATUS.BLOCKED_ELEVATED ]: [ 'needs confirming', 's-bad' ]
 };
 
 async function send( type, extra = {} ) {
@@ -161,6 +163,8 @@ async function render() {
 		note.hidden = true;
 	}
 
+	renderElevatedWarning( report );
+
 	const list = el( 'patch-list' );
 	list.replaceChildren();
 	el( 'empty' ).hidden = state.patches.length > 0;
@@ -175,6 +179,34 @@ async function render() {
 		list.append( renderPatch( patch, payload, report ) );
 	}
 }
+
+/**
+ * Show the block when the account holds elevated rights.
+ *
+ * The page refuses to run a patch until the user confirms, because an
+ * injected patch inherits every right the account has.
+ */
+function renderElevatedWarning( report ) {
+	const box = el( 'elevated-warning' );
+	const blocked = report && ( report.files || [] )
+		.find( ( f ) => f.status === STATUS.BLOCKED_ELEVATED );
+	if ( !blocked ) {
+		box.hidden = true;
+		return;
+	}
+	el( 'elevated-text' ).textContent = blocked.reason;
+	box.hidden = false;
+}
+
+el( 'elevated-ack' ).addEventListener( 'click', async () => {
+	const [ tab ] = await chrome.tabs.query( { active: true, currentWindow: true } );
+	if ( !tab || !tab.url ) {
+		return;
+	}
+	await send( MSG.ACK_ELEVATED, { origin: new URL( tab.url ).origin } );
+	await chrome.tabs.reload( tab.id );
+	window.close();
+} );
 
 el( 'master-toggle' ).addEventListener( 'change', async ( ev ) => {
 	await send( MSG.SET_ENABLED, { value: ev.target.checked } );

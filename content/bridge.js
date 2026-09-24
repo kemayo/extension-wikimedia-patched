@@ -54,9 +54,13 @@
 
 		chrome.runtime.sendMessage( { type: MSG_GET_PAYLOAD } )
 			.then( ( reply ) => {
-				send( reply && reply.ok ?
+				const result = reply && reply.ok ?
 					reply.result :
-					{ active: false, reason: 'error', patches: [] } );
+					{ active: false, reason: 'error', patches: [] };
+				send( result );
+				if ( result.active && result.patches.length ) {
+					showBanner( result.patches );
+				}
 			} )
 			.catch( () => {
 				send( { active: false, reason: 'no-worker', patches: [] } );
@@ -68,4 +72,59 @@
 			} ).catch( () => {} );
 		} );
 	} );
+
+	/**
+	 * Show a bar while a patch is active.
+	 *
+	 * The bar cannot be closed. A user must always be able to see that the
+	 * page is not running the deployed code.
+	 *
+	 * @param {Object[]} patches
+	 */
+	function showBanner( patches ) {
+		const host = document.createElement( 'div' );
+		host.id = 'wikimedia-patched-banner';
+		const root = host.attachShadow( { mode: 'closed' } );
+
+		const style = document.createElement( 'style' );
+		style.textContent = `
+			.bar {
+				position: fixed; left: 0; bottom: 0; z-index: 2147483647;
+				max-width: 46ch; padding: 6px 10px;
+				font: 12px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
+				color: #fff; background: #ac6600;
+				border-top-right-radius: 3px;
+				box-shadow: 0 0 6px rgba( 0, 0, 0, 0.4 );
+			}
+			.bar b { font-weight: 700; }
+			.bar a { color: #fff; }
+		`;
+
+		const bar = document.createElement( 'div' );
+		bar.className = 'bar';
+		const label = document.createElement( 'b' );
+		label.textContent = 'Patched: ';
+		bar.append( label );
+		patches.forEach( ( patch, i ) => {
+			if ( i ) {
+				bar.append( document.createTextNode( ', ' ) );
+			}
+			const link = document.createElement( 'a' );
+			link.href = `https://gerrit.wikimedia.org/r/c/${ patch.project }/+/` +
+				`${ patch.changeNumber }/${ patch.patchset }`;
+			link.target = '_blank';
+			link.rel = 'noreferrer';
+			link.textContent = `${ patch.changeNumber } PS${ patch.patchset }`;
+			bar.append( link );
+		} );
+
+		root.append( style, bar );
+
+		const attach = () => ( document.body || document.documentElement ).append( host );
+		if ( document.body ) {
+			attach();
+		} else {
+			document.addEventListener( 'DOMContentLoaded', attach, { once: true } );
+		}
+	}
 } )();
