@@ -193,30 +193,3 @@ export function diffManifest( parentText, patchedText ) {
 
 	return { addedStyles, addedMessages, addedPackageFiles, newModules, otherChanges };
 }
-
-/**
- * Guess which extension or skin a repository belongs to.
- *
- * ResourceLoader names a packaged file relative to the module's
- * localBasePath, which is usually the extension root. So the repository path
- * is usually the payload key already. This map only narrows the search.
- *
- * @param {string} project Gerrit project, such as "mediawiki/extensions/VisualEditor".
- * @return {string[]} Module name prefixes, or an empty array if unknown.
- */
-export function modulePrefixesForProject( project ) {
-	if ( project === 'mediawiki/core' ) {
-		return [ 'mediawiki.', 'jquery.', 'oojs', 'vue', 'codex' ];
-	}
-	const ext = /^mediawiki\/extensions\/([^/]+)$/.exec( project );
-	if ( ext ) {
-		const name = ext[ 1 ];
-		// ext.visualEditor.* comes from VisualEditor, ext.cite.* from Cite.
-		return [ 'ext.' + name.charAt( 0 ).toLowerCase() + name.slice( 1 ), 'ext.' + name ];
-	}
-	const skin = /^mediawiki\/skins\/([^/]+)$/.exec( project );
-	if ( skin ) {
-		return [ 'skins.' + skin[ 1 ].toLowerCase() ];
-	}
-	return [];
-}

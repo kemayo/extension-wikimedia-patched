@@ -15,13 +15,59 @@ It can apply:
 
 - New JavaScript files added to a ResourceLoader module
 - English messages from `i18n/en.json`
-- Plain CSS, and LESS that needs no compiler
+- Stylesheets, including their `@import` chain across repositories
 - Changes to existing JavaScript files, with a warning when the wiki runs a
   different base than the patch was written against
 
 It can never apply PHP, hooks, schema changes, API changes or new module
 registrations. Those need a real deploy. Use [patchdemo] for those. The popup
 lists every file in the change and says what happened to each one.
+
+## Where things live
+
+A patch names a file by its path in one repository. That is not enough to do
+anything with it, so the extension knows the shape of a MediaWiki install
+(`shared/mw-layout.js`):
+
+- A Gerrit project maps to where a wiki puts it: `mediawiki/extensions/Foo`
+  becomes `extensions/Foo`, `mediawiki/skins/Vector` becomes `skins/Vector`.
+- `wgVersion` maps to the branch the wiki runs. A wiki reporting
+  `1.47.0-wmf.20` is running `wmf/1.47.0-wmf.20`, so every lookup reads the
+  code that wiki really has, not master.
+- A skin key maps to the repository that provides it. `vector-2022` and
+  `vector` both come from `mediawiki/skins/Vector`, `minerva` from
+  `MinervaNeue`, `contenttranslation` from an extension, and a few come from
+  core.
+
+That is enough to follow a stylesheet's imports. `@import
+'mediawiki.skin.variables.less'` has no fixed answer: ResourceLoader looks in
+the active skin's `SkinLessImportPaths` directory first, then in core's
+`resources/src/mediawiki.less`. So the extension reads the skin's own
+manifest for that directory rather than copying the value, and falls back to
+core the way ResourceLoader does. Names beginning
+`mediawiki.skin.codex/`, `mediawiki.skin.codex-design-tokens/` or
+`@wikimedia/codex-icons/` are not paths at all; they map into core's
+`resources/lib/`.
+
+For change 1321624 on Vector 2022 at `wmf/1.47.0-wmf.20`, that resolves to
+eight files across two repositories:
+
+```
+mediawiki/skins/Vector  resources/mediawiki.less/vector-2022/mediawiki.skin.variables.less
+mediawiki/core          resources/src/mediawiki.less/mediawiki.skin.defaults.less
+mediawiki/core          resources/lib/codex/mixins/codex-public-mixins.less
+mediawiki/core          resources/lib/codex/mixins/css-icon.less
+mediawiki/core          resources/lib/codex-icons/codex-icon-paths.less
+mediawiki/core          resources/lib/codex/mixins/link.less
+mediawiki/core          resources/lib/codex/mixins/button-layout-flush.less
+mediawiki/core          resources/lib/codex-design-tokens/theme-wikimedia-ui.less
+```
+
+Run `node scripts/less-smoke.mjs` to see it happen against the real Gerrit.
+
+Because the answer depends on the skin, and only the page knows the skin,
+the page asks the background worker to build its stylesheets once
+`mw.config` is filled. The result is cached per patch, skin and wiki version.
 
 ## Security
 
@@ -42,10 +88,17 @@ unlisted XPI.
 ## Build and install
 
 ```sh
+npm install less       # optional, but LESS stays uncompiled without it
 npm run build          # writes dist/chrome and dist/firefox
 npm test               # unit tests, no network
 npm run smoke          # reads a real change from gerrit.wikimedia.org
+npm run smoke:less     # resolves that change's stylesheet imports
 ```
+
+The build copies `node_modules/less` into `vendor/` when it is there. The
+extension never fetches a compiler at run time: code has to ship in the
+package. Without it, stylesheets are reported as skipped and everything else
+still works.
 
 - **Chrome**: `chrome://extensions` -> Developer mode -> Load unpacked ->
   `dist/chrome`.
@@ -84,6 +137,11 @@ Verified:
   gate, and that a throwing declarator does not break the page.
 - The Gerrit pipeline. `npm run smoke` reads change 1321624 from the real
   Gerrit and prints what the extension would do with each of its files.
+- Import resolution. `npm run smoke:less` resolves that change's stylesheet
+  against the live repositories at the branch enwiki runs, and finds all
+  eight files with nothing missing. The offline tests cover the rules
+  themselves, including that an `@import` inside a comment is left alone —
+  MediaWiki's own files show examples that way.
 
 Not verified, because it needs a real browser:
 
@@ -98,6 +156,9 @@ Not verified, because it needs a real browser:
   module in Firefox. If they do not, the fallback is the
   `<script src=moz-extension://…>` injection, which is not written yet.
 - The production permission prompt.
+- The bundled LESS compiler. `npm` is not reachable from the sandbox this was
+  written in, so `vendor/less.js` is still the placeholder and `compileLess`
+  has never run. Everything up to it is tested.
 
 ## Status
 

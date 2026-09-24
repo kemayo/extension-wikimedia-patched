@@ -9,10 +9,11 @@ import {
 	getChange, pickRevision, listFiles, getFileContent, resolveChangeNumber
 } from './gerrit.js';
 import {
-	KIND, classifyPath, isClientSide, diffMessages, diffManifest, modulePrefixesForProject
+	KIND, classifyPath, isClientSide, diffMessages, diffManifest
 } from './patch-model.js';
+import { modulePrefixesForProject } from '../shared/mw-layout.js';
 import { listDirectory } from './gitiles.js';
-import { prepareStyle } from '../shared/less-lite.js';
+import { isPlainCss } from '../shared/less-compile.js';
 import { STATUS } from '../shared/constants.js';
 import { patchKey } from './store.js';
 
@@ -43,6 +44,7 @@ export async function preparePatch( ref ) {
 		modulePrefixes: modulePrefixesForProject( change.project ),
 		messages: {},
 		styles: [],
+		pendingStyles: [],
 		replaceFiles: [],
 		newFiles: [],
 		skipped: [],
@@ -96,13 +98,12 @@ export async function preparePatch( ref ) {
 			return;
 		}
 		if ( kind === KIND.CSS || kind === KIND.LESS ) {
-			const prepared = prepareStyle( path, source );
-			if ( prepared.ok ) {
-				payload.styles.push( { path, css: prepared.css } );
+			if ( isPlainCss( path ) ) {
+				payload.styles.push( { path, css: source } );
 			} else {
-				payload.skipped.push( {
-					path, kind, status: STATUS.STYLE_SKIPPED, reason: prepared.reason
-				} );
+				// LESS needs the active skin to resolve its imports, and only
+				// the page knows the skin. The page asks for it later.
+				payload.pendingStyles.push( { path, source } );
 			}
 			return;
 		}
@@ -124,6 +125,7 @@ export async function preparePatch( ref ) {
 	payload.replaceFiles.sort( byPath );
 	payload.newFiles.sort( byPath );
 	payload.styles.sort( byPath );
+	payload.pendingStyles.sort( byPath );
 	payload.skipped.sort( byPath );
 
 	return payload;

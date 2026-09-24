@@ -12,6 +12,8 @@ import {
 } from '../shared/constants.js';
 import { parsePatchRef } from './gerrit.js';
 import { preparePatch } from './prepare.js';
+import { flattenStyle } from './less-resolve.js';
+import { compileLess } from '../shared/less-compile.js';
 import * as store from './store.js';
 import {
 	enableDebug, disableDebug, clearAllDebugCookies,
@@ -139,6 +141,62 @@ async function buildPagePayload( origin ) {
 	};
 }
 
+/** Compiled stylesheets, keyed by patch, skin and wiki version. */
+const styleCache = new Map();
+
+/**
+ * Compile every stylesheet that needed the skin.
+ *
+ * A patch stylesheet imports mediawiki.skin.variables.less, which resolves
+ * to a different file per skin, in a different repository. So the work
+ * cannot happen until the page says which skin it uses.
+ *
+ * @param {string} skinKey
+ * @param {string|null} version
+ * @return {Promise<Array<{ patchKey: string, path: string, css: string|null,
+ *                          reason: string|null }>>}
+ */
+async function buildStyles( skinKey, version ) {
+	const patches = ( await store.getPatches() ).filter( ( p ) => p.enabled && p.reviewed );
+	const out = [];
+
+	for ( const patch of patches ) {
+		const payload = await store.getCachedPayload( patch.key );
+		for ( const style of ( payload && payload.pendingStyles ) || [] ) {
+			const key = `${ patch.key }|${ skinKey }|${ version }|${ style.path }`;
+			if ( styleCache.has( key ) ) {
+				out.push( styleCache.get( key ) );
+				continue;
+			}
+			const flat = await flattenStyle( {
+				source: style.source,
+				path: style.path,
+				project: payload.project,
+				ref: payload.sha,
+				skinKey,
+				version
+			} );
+			let entry;
+			if ( flat.errors.length || flat.missing.length ) {
+				entry = {
+					patchKey: patch.key, path: style.path, css: null,
+					reason: [ ...flat.errors, ...flat.missing ].join( '; ' )
+				};
+			} else {
+				const compiled = await compileLess( flat.source, { filename: style.path } );
+				entry = {
+					patchKey: patch.key, path: style.path,
+					css: compiled.ok ? compiled.css : null,
+					reason: compiled.reason
+				};
+			}
+			styleCache.set( key, entry );
+			out.push( entry );
+		}
+	}
+	return out;
+}
+
 /** Handle one message. Split out so the listener can stay small. */
 async function dispatch( msg, sender ) {
 	switch ( msg.type ) {
@@ -207,6 +265,14 @@ async function dispatch( msg, sender ) {
 		case MSG.ACK_ELEVATED:
 			await store.ackElevated( msg.origin );
 			return { ok: true };
+
+		case MSG.GET_STYLES: {
+			if ( !sender.tab || !sender.origin ||
+				!classifyOrigin( sender.origin ) ) {
+				throw new Error( 'Refused: not a wiki.' );
+			}
+			return { styles: await buildStyles( msg.skinKey, msg.version ) };
+		}
 
 		case MSG.GET_SETTINGS:
 			return { settings: await store.getSettings() };

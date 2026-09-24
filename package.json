@@ -7,6 +7,7 @@
 	"scripts": {
 		"build": "node build.mjs",
 		"test": "npm run build && node --test \"test/*.test.js\"",
-		"smoke": "node scripts/gerrit-smoke.mjs"
+		"smoke": "node scripts/gerrit-smoke.mjs",
+		"smoke:less": "node scripts/less-smoke.mjs"
 	}
 }

@@ -40,7 +40,6 @@
 		}
 		payloadSettled = true;
 		payload = data;
-		delete document.documentElement.dataset.wmpChannel;
 		for ( const fn of payloadWaiters.splice( 0 ) ) {
 			safely( fn, data );
 		}
@@ -61,6 +60,35 @@
 	setTimeout( () => settlePayload( {
 		active: false, reason: 'timed-out', patches: []
 	} ), IMPL_BUFFER_TIMEOUT_MS );
+
+	/**
+	 * Ask the background worker something, through the bridge.
+	 *
+	 * @param {Object} message
+	 * @return {Promise<Object>}
+	 */
+	let nextRequestId = 0;
+
+	function ask( message ) {
+		return new Promise( ( resolve, reject ) => {
+			const id = ++nextRequestId;
+			const onResponse = ( ev ) => {
+				if ( !ev.detail || ev.detail.id !== id ) {
+					return;
+				}
+				document.removeEventListener( channel + ':res', onResponse );
+				if ( ev.detail.ok ) {
+					resolve( ev.detail.result );
+				} else {
+					reject( new Error( ev.detail.error || 'request failed' ) );
+				}
+			};
+			document.addEventListener( channel + ':res', onResponse );
+			document.dispatchEvent( new CustomEvent( channel + ':req', {
+				detail: { id, message }
+			} ) );
+		} );
+	}
 
 	/** Run a function and swallow anything it throws. */
 	function safely( fn, ...args ) {
@@ -187,10 +215,73 @@
 		if ( !parts.length ) {
 			return;
 		}
+		if ( !plainStylesAdded ) {
+			plainStylesAdded = true;
+			addStyleText( parts.join( '\n\n' ) );
+		}
+		moveStylesLast();
+	}
+
+	let plainStylesAdded = false;
+
+	/**
+	 * Ask for the stylesheets that need the active skin.
+	 *
+	 * A patch stylesheet imports mediawiki.skin.variables.less, and which
+	 * file that is depends on the skin. Only the page knows the skin, so
+	 * the request happens here and the worker does the work.
+	 *
+	 * @param {Object} mw
+	 */
+	let stylesRequested = false;
+
+	function requestSkinStyles( mw ) {
+		if ( stylesRequested || !payload || !payload.active ) {
+			return;
+		}
+		const pending = payload.patches.some( ( p ) => ( p.pendingStyles || [] ).length );
+		if ( !pending || !mw.config || typeof mw.config.get !== 'function' ) {
+			return;
+		}
+		const skinKey = mw.config.get( 'skin' );
+		if ( !skinKey ) {
+			return;
+		}
+		stylesRequested = true;
+
+		ask( {
+			type: MSG.GET_STYLES,
+			skinKey,
+			version: mw.config.get( 'wgVersion' )
+		} ).then( ( result ) => {
+			for ( const style of result.styles || [] ) {
+				if ( style.css ) {
+					addStyleText( `/* ${ style.patchKey } ${ style.path } */\n${ style.css }` );
+					record( style.patchKey, style.path, STATUS.STYLE_INJECTED,
+						'Compiled for the ' + skinKey + ' skin and injected.' );
+				} else {
+					record( style.patchKey, style.path, STATUS.STYLE_SKIPPED,
+						style.reason || 'The stylesheet could not be compiled.' );
+				}
+			}
+			safely( moveStylesLast );
+		}, ( e ) => {
+			for ( const patch of payload.patches ) {
+				for ( const style of patch.pendingStyles || [] ) {
+					record( patch.key, style.path, STATUS.STYLE_SKIPPED, String( e.message || e ) );
+				}
+			}
+		} );
+	}
+
+	/** Append to the extension's own style element, making it if needed. */
+	function addStyleText( css ) {
 		if ( !styleEl ) {
 			styleEl = document.createElement( 'style' );
 			styleEl.id = 'wikimedia-patched-styles';
-			styleEl.textContent = parts.join( '\n\n' );
+			styleEl.textContent = css;
+		} else {
+			styleEl.textContent += '\n\n' + css;
 		}
 		moveStylesLast();
 	}
@@ -493,6 +584,7 @@
 		}
 
 		placePendingFiles( mw );
+		safely( requestSkinStyles, mw );
 		moveStylesLast();
 	}
 

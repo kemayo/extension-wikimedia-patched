@@ -74,6 +74,20 @@
 				type: MSG_REPORT_STATUS, report: ev.detail
 			} ).catch( () => {} );
 		} );
+
+		// Later questions from the page, such as "compile these styles for
+		// this skin". Each carries an id so the answer can be matched.
+		document.addEventListener( channel + ':req', ( ev ) => {
+			const { id, message } = ev.detail || {};
+			const answer = ( detail ) => document.dispatchEvent(
+				new CustomEvent( channel + ':res', { detail: { id, ...detail } } )
+			);
+			ext.runtime.sendMessage( message )
+				.then( ( reply ) => answer( reply && reply.ok ?
+					{ ok: true, result: reply.result } :
+					{ ok: false, error: reply ? reply.error : 'no answer' } ) )
+				.catch( ( e ) => answer( { ok: false, error: String( e && e.message || e ) } ) );
+		} );
 	} );
 
 	/**

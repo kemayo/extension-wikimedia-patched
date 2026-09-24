@@ -125,5 +125,6 @@ export const MSG = {
 	GET_TAB_STATUS: 'get-tab-status',
 	ACK_ELEVATED: 'ack-elevated',
 	GET_SETTINGS: 'get-settings',
-	SET_SETTING: 'set-setting'
+	SET_SETTING: 'set-setting',
+	GET_STYLES: 'get-styles'
 };

@@ -13,7 +13,7 @@ const REAL_FIXTURE = 'test/fixtures/editcheck-checks.debug.js';
  * @param {Object|null} payload
  * @return {Promise<Object>} The page, plus a reports array.
  */
-async function startPage( payload ) {
+async function startPage( payload, onRequest ) {
 	const page = createPage();
 	page.runFile( MAIN_WORLD );
 
@@ -23,6 +23,19 @@ async function startPage( payload ) {
 	const reports = [];
 	page.document.addEventListener( channel + ':out', ( ev ) => reports.push( ev.detail ) );
 
+	// Stand in for the bridge, which relays a question to the worker.
+	const requests = [];
+	page.document.addEventListener( channel + ':req', ( ev ) => {
+		requests.push( ev.detail.message );
+		Promise.resolve( onRequest ? onRequest( ev.detail.message ) : null )
+			.then( ( result ) => page.runScript(
+				`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':res' ) }, ` +
+				`{ detail: ${ JSON.stringify( { id: ev.detail.id, ok: true } ) } } ) );`
+					.replace( '"ok":true', '"ok":true,"result":' + JSON.stringify( result || {} ) )
+			) );
+	} );
+	page.requests = requests;
+
 	if ( payload ) {
 		page.runScript(
 			`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':in' ) }, ` +
@@ -30,7 +43,7 @@ async function startPage( payload ) {
 		);
 	}
 	await page.flush();
-	return { page, reports, channel };
+	return { page, reports, channel, requests };
 }
 
 function patchWith( overrides ) {
@@ -470,4 +483,74 @@ test( 'a scripts-only module is left alone and reported', async () => {
 		.find( ( f ) => f.path === 'resources/src/legacy/thing.js' );
 	assert.equal( row.status, 'not-on-page' );
 	assert.match( row.reason, /do not use packageFiles/ );
+} );
+
+// ------------------------------------------------------------ skin styles
+
+test( 'the page asks the worker to build the stylesheets its skin needs', async () => {
+	const payload = patchWith( {
+		pendingStyles: [
+			{ path: 'editcheck/modules/styles/X.less', source: '@import "x";' }
+		]
+	} );
+	const { page, reports, requests } = await startPage( payload, ( msg ) => {
+		assert.equal( msg.type, 'get-styles' );
+		// The worker cannot know these; only the page can.
+		assert.equal( msg.skinKey, 'vector-2022' );
+		assert.equal( msg.version, '1.47.0-wmf.20' );
+		return {
+			styles: [ {
+				patchKey: '1321624@17',
+				path: 'editcheck/modules/styles/X.less',
+				css: '.sourceveri { color: red; }',
+				reason: null
+			} ]
+		};
+	} );
+
+	bootMediaWiki( page );
+	page.runScript(
+		'mw.config.set( "skin", "vector-2022" );' +
+		'mw.config.set( "wgVersion", "1.47.0-wmf.20" );' +
+		'mw.editcheck = { registered: [] };'
+	);
+	page.runScript( CHECKS_PAYLOAD );
+	await page.flush( 100 );
+
+	assert.equal( requests.length, 1, 'the page asks once, not once per module' );
+	const styles = page.document.head.children
+		.filter( ( c ) => c.id === 'wikimedia-patched-styles' );
+	assert.equal( styles.length, 1 );
+	assert.match( styles[ 0 ].textContent, /\.sourceveri \{ color: red; \}/ );
+
+	const row = reports.at( -1 ).files
+		.find( ( f ) => f.path === 'editcheck/modules/styles/X.less' );
+	assert.equal( row.status, 'style-injected' );
+	assert.match( row.reason, /vector-2022/ );
+} );
+
+test( 'a stylesheet that will not build says why', async () => {
+	const payload = patchWith( {
+		pendingStyles: [
+			{ path: 'editcheck/modules/styles/X.less', source: '@import "x";' }
+		]
+	} );
+	const { page, reports } = await startPage( payload, () => ( {
+		styles: [ {
+			patchKey: '1321624@17',
+			path: 'editcheck/modules/styles/X.less',
+			css: null,
+			reason: 'No LESS compiler is bundled. Run `npm install less` and build again.'
+		} ]
+	} ) );
+
+	bootMediaWiki( page );
+	page.runScript( 'mw.config.set( "skin", "vector-2022" ); mw.editcheck = { registered: [] };' );
+	page.runScript( CHECKS_PAYLOAD );
+	await page.flush( 100 );
+
+	const row = reports.at( -1 ).files
+		.find( ( f ) => f.path === 'editcheck/modules/styles/X.less' );
+	assert.equal( row.status, 'style-skipped' );
+	assert.match( row.reason, /npm install less/ );
 } );

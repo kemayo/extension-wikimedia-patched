@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-	KIND, classifyPath, isClientSide, diffMessages, diffManifest, modulePrefixesForProject
+	KIND, classifyPath, isClientSide, diffMessages, diffManifest
 } from '../background/patch-model.js';
 
 test( 'classifies the files of change 1321624', () => {
@@ -75,12 +75,4 @@ test( 'diffManifest reports no other change when only modules move', () => {
 	const before = JSON.stringify( { ResourceModules: { 'ext.x': { styles: [] } } } );
 	const after = JSON.stringify( { ResourceModules: { 'ext.x': { styles: [ 'a.css' ] } } } );
 	assert.equal( diffManifest( before, after ).otherChanges, false );
-} );
-
-test( 'modulePrefixesForProject knows core, extensions and skins', () => {
-	assert.deepEqual( modulePrefixesForProject( 'mediawiki/extensions/VisualEditor' ),
-		[ 'ext.visualEditor', 'ext.VisualEditor' ] );
-	assert.deepEqual( modulePrefixesForProject( 'mediawiki/skins/Vector' ), [ 'skins.vector' ] );
-	assert.ok( modulePrefixesForProject( 'mediawiki/core' ).includes( 'mediawiki.' ) );
-	assert.deepEqual( modulePrefixesForProject( 'operations/puppet' ), [] );
 } );
