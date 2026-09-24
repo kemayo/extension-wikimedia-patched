@@ -26,6 +26,7 @@ import { stackOrder, dependencyReport } from '../shared/stack-order.js';
 import { deployedOn, undeployedBase } from './deps.js';
 import { branchExists } from './repo-files.js';
 import { deployBranch } from '../shared/mw-layout.js';
+import { mayHandle, senderOrigin } from './sender-policy.js';
 
 /** Turn a match pattern into a host test. */
 function matchToRegExp( pattern ) {
@@ -83,7 +84,6 @@ async function handleAddPatch( input ) {
 		subject: payload.subject,
 		owner: payload.owner,
 		changeStatus: payload.status,
-		sha: payload.sha,
 		parentSha: payload.parentSha,
 		changeId: payload.changeId,
 		deps: payload.deps,
@@ -410,15 +410,16 @@ async function dispatch( msg, sender ) {
 
 		case MSG.GET_PAYLOAD: {
 			// Only a content script may ask, and only for its own origin.
-			if ( !sender.tab || !sender.origin ) {
+			const origin = senderOrigin( sender );
+			if ( !sender.tab || !origin ) {
 				throw new Error( 'Refused: no tab origin.' );
 			}
-			const result = await buildPagePayload( sender.origin );
+			const result = await buildPagePayload( origin );
 			if ( result.active ) {
 				// The wiki's own copy of each changed file, so the page can
 				// merge instead of replacing. Usually cached from the last
 				// visit; never allowed to delay the page for long.
-				const version = versionFor( sender.origin );
+				const version = versionFor( origin );
 				if ( version ) {
 					const enriched = await withBudget( Promise.all(
 						result.patches.map( ( p ) => withDeployed( p, version ) )
@@ -429,7 +430,7 @@ async function dispatch( msg, sender ) {
 				}
 				const settings = await store.getSettings();
 				if ( settings.debugStrategy === 'cookie' ) {
-					await enableDebug( sender.origin );
+					await enableDebug( origin );
 				}
 				// The request strategy arms the tab on navigation instead,
 				// because the startup script is requested before a content
@@ -443,8 +444,8 @@ async function dispatch( msg, sender ) {
 				setTabStatus( sender.tab.id, msg.report );
 				refreshBadge( sender.tab.id );
 			}
-			if ( msg.report && msg.report.version && sender.origin ) {
-				rememberVersion( sender.origin, msg.report.version );
+			if ( msg.report && msg.report.version && senderOrigin( sender ) ) {
+				rememberVersion( senderOrigin( sender ), msg.report.version );
 				// Fetch the deployed files now, off the page's critical path,
 				// so the next load finds them cached.
 				warmDeployed( msg.report.version ).catch( () => {} );
@@ -455,12 +456,14 @@ async function dispatch( msg, sender ) {
 			return { report: getTabStatus( msg.tabId ) };
 
 		case MSG.ACK_ELEVATED:
+			if ( !classifyOrigin( msg.origin ) ) {
+				throw new Error( 'Refused: not a wiki.' );
+			}
 			await store.ackElevated( msg.origin );
 			return { ok: true };
 
 		case MSG.GET_STYLES: {
-			if ( !sender.tab || !sender.origin ||
-				!classifyOrigin( sender.origin ) ) {
+			if ( !sender.tab || !classifyOrigin( senderOrigin( sender ) ) ) {
 				throw new Error( 'Refused: not a wiki.' );
 			}
 			return { styles: await buildStyles( msg.skinKey, msg.version ) };
@@ -469,6 +472,9 @@ async function dispatch( msg, sender ) {
 		case MSG.ACK_SITE:
 			// The popup has already asked the browser for the host
 			// permission. This records that the user accepted the risk.
+			if ( !classifyOrigin( msg.origin ) ) {
+				throw new Error( 'Refused: not a wiki.' );
+			}
 			await store.ackProduction( msg.origin );
 			return { ok: true };
 
@@ -487,6 +493,11 @@ async function dispatch( msg, sender ) {
 }
 
 ext.runtime.onMessage.addListener( ( msg, sender, sendResponse ) => {
+	if ( !msg || !mayHandle( msg.type, sender, ext.runtime.getURL( '' ) ) ) {
+		// A page asked for something only the extension's own pages may do.
+		sendResponse( { ok: false, error: 'Refused: not allowed from a web page.' } );
+		return false;
+	}
 	dispatch( msg, sender )
 		.then( ( result ) => {
 			// A change to the switch, a site's confirmation or the patch

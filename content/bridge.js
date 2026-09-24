@@ -18,6 +18,9 @@
 
 	const MSG_GET_PAYLOAD = 'get-payload';
 	const MSG_REPORT_STATUS = 'report-status';
+	// The page can reach this relay, so it passes on nothing else. The
+	// worker refuses the rest anyway; this keeps the page from even trying.
+	const RELAYABLE = new Set( [ 'get-styles' ] );
 
 	/**
 	 * Both content scripts run at document_start, but the browser does not
@@ -82,6 +85,10 @@
 			const answer = ( detail ) => document.dispatchEvent(
 				new CustomEvent( channel + ':res', { detail: { id, ...detail } } )
 			);
+			if ( !message || !RELAYABLE.has( message.type ) ) {
+				answer( { ok: false, error: 'Refused: not relayed.' } );
+				return;
+			}
 			ext.runtime.sendMessage( message )
 				.then( ( reply ) => answer( reply && reply.ok ?
 					{ ok: true, result: reply.result } :

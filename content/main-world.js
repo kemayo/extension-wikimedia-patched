@@ -55,8 +55,13 @@
 		}
 	}
 
-	document.addEventListener( channel + ':in', ( ev ) => settlePayload( ev.detail ),
-		{ once: true } );
+	document.addEventListener( channel + ':in', ( ev ) => {
+		// The bridge has the name by now. Take it off the page, so later page
+		// scripts cannot find it. This only narrows the window: the worker
+		// is what refuses a page's requests.
+		delete document.documentElement.dataset.wmpChannel;
+		settlePayload( ev.detail );
+	}, { once: true } );
 
 	// If the bridge never answers, carry on without patches.
 	setTimeout( () => settlePayload( {
