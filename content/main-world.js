@@ -23,6 +23,7 @@
 	// @include shared/constants.js
 	// @include shared/resolve-module.js
 	// @include shared/verify-base.js
+	// @include shared/merge3.js
 
 	// ---------------------------------------------------------------- channel
 
@@ -121,6 +122,12 @@
 		scheduleReport();
 	}
 
+	function wikiVersion() {
+		const mw = window.mw;
+		return mw && mw.config && typeof mw.config.get === 'function' ?
+			mw.config.get( 'wgVersion' ) : null;
+	}
+
 	function scheduleReport() {
 		if ( reportTimer ) {
 			return;
@@ -135,6 +142,8 @@
 					// from "the extension never ran here".
 					active: !!( payload && payload.active ),
 					reason: payload ? payload.reason : 'no-answer',
+					// Lets the worker fetch this wiki's branch for next time.
+					version: wikiVersion(),
 					ranAt: Date.now()
 				}
 			} ) );
@@ -357,6 +366,14 @@
 			return;
 		}
 
+		if ( moduleObj.script && moduleObj.script.files &&
+			Object.prototype.hasOwnProperty.call( moduleObj.script.files, target.key ) ) {
+			record( patch.key, file.path, STATUS.TIMED_OUT,
+				`${ target.module } already has this file, and it ran before the ` +
+				'extension was ready. Reload the page.' );
+			return;
+		}
+
 		const factory = compileFile( patch, file );
 
 		// Let other files in the module require this one.
@@ -392,30 +409,146 @@
 	}
 
 	/**
-	 * Put a changed file into the payload, in place of the deployed one.
+	 * Find the best copy of a file as the wiki has it.
 	 *
+	 * In debug mode the module payload holds the file verbatim, which is
+	 * exactly what runs, so nothing beats it. Otherwise use the copy on the
+	 * wiki's wmf branch, which the worker fetched. Minified code is never
+	 * used: it cannot be compared with source, let alone merged.
+	 *
+	 * @param {Object} mw
+	 * @param {*} liveFile Current value in the module's files map.
+	 * @param {Object} file The patch file, maybe with a `deployed` copy.
+	 * @return {{ text: string, from: string }|null}
+	 */
+	function wikiCopyOf( mw, liveFile, file ) {
+		if ( inDebugMode( mw ) && typeof liveFile === 'function' ) {
+			const body = extractBody( String( liveFile ) );
+			if ( body !== null ) {
+				return { text: body, from: 'the running page' };
+			}
+		}
+		if ( file.deployed && typeof file.deployed.source === 'string' ) {
+			return { text: file.deployed.source, from: file.deployed.ref };
+		}
+		return null;
+	}
+
+	function sameText( a, b ) {
+		return typeof a === 'string' && typeof b === 'string' && normalise( a ) === normalise( b );
+	}
+
+	/**
+	 * Put a changed file into the payload.
+	 *
+	 * Replacing the whole file brings along everything between the patch
+	 * base and the wiki's copy: master changes the wiki never got, and the
+	 * undoing of any backport it did get. So when the wiki's copy differs
+	 * from the base, merge only the patch's own changes onto it. Replace the
+	 * whole file only when the merge conflicts, and say what that costs.
+	 *
+	 * @param {Object} mw
 	 * @param {Object} patch
 	 * @param {Object} file
 	 * @param {Object} script The payload's script object.
 	 * @param {string} key
 	 * @param {string} moduleName
 	 */
-	function replaceFileInPayload( patch, file, script, key, moduleName ) {
-		const verdict = compareBase( script.files[ key ], file.parentSource );
-		script.files[ key ] = compileFile( patch, file );
+	function replaceFileInPayload( mw, patch, file, script, key, moduleName ) {
+		const where = `in ${ moduleName }`;
+		const wiki = wikiCopyOf( mw, script.files[ key ], file );
+		const replaceWhole = () => {
+			script.files[ key ] = compileFile( patch, file );
+		};
 
-		if ( verdict === 'differs' ) {
-			record( patch.key, file.path, STATUS.BASE_SKEW,
-				`Replaced in ${ moduleName }. The wiki runs a different version of ` +
-				'this file, so the patch may not fit.' );
-		} else if ( verdict === 'match' ) {
+		if ( !wiki ) {
+			replaceWhole();
 			record( patch.key, file.path, STATUS.APPLIED,
-				`Replaced in ${ moduleName }. The wiki runs the patch base.` );
-		} else {
-			record( patch.key, file.path, STATUS.APPLIED,
-				`Replaced in ${ moduleName }. The base was not checked, because the ` +
-				'page is not in debug mode.' );
+				`Replaced ${ where }. The base was not checked: the page is not in ` +
+				"debug mode, and the wiki's branch is not known yet. Reload to check." );
+			return;
 		}
+		if ( sameText( wiki.text, file.source ) ) {
+			// The patch is merged and deployed, or backported.
+			record( patch.key, file.path, STATUS.APPLIED,
+				`Already on the wiki (${ wiki.from }), so left as it is.` );
+			return;
+		}
+		if ( typeof file.parentSource !== 'string' ) {
+			replaceWhole();
+			record( patch.key, file.path, STATUS.APPLIED,
+				`Replaced ${ where }. Gerrit gave no base to compare against.` );
+			return;
+		}
+		if ( sameText( wiki.text, file.parentSource ) ) {
+			replaceWhole();
+			record( patch.key, file.path, STATUS.APPLIED,
+				`Replaced ${ where }. The wiki runs the patch base (${ wiki.from }).` );
+			return;
+		}
+
+		// ResourceLoader ends every packaged file with a newline, whether or
+		// not the file had one. Make all three agree, or that one line reads
+		// as a difference.
+		const tidy = ( text ) => text.replace( /\s*$/, '\n' );
+		const merged = merge3( tidy( file.parentSource ), tidy( wiki.text ), tidy( file.source ) );
+		let mergedFn = null;
+		let mergeError = null;
+		if ( merged.clean ) {
+			try {
+				mergedFn = compileFile( patch, { path: file.path, source: merged.text } );
+			} catch ( e ) {
+				// Clean line by line, but not valid code. Never run that.
+				mergeError = e;
+			}
+		}
+		if ( mergedFn ) {
+			script.files[ key ] = mergedFn;
+			record( patch.key, file.path, STATUS.MERGED,
+				`Merged ${ where }. The wiki's copy (${ wiki.from }) differs from the ` +
+				`patch base in ${ merged.oursHunks } place(s), so only the patch's ` +
+				`${ merged.theirsHunks } change(s) were put onto it.` );
+			return;
+		}
+
+		replaceWhole();
+		const drift = driftBetween( tidy( wiki.text ), tidy( file.parentSource ) );
+		const lines = merged.conflicts.map( ( c ) => c.baseStart ).join( ', ' );
+		const why = mergeError ?
+			`the merged file is not valid JavaScript (${ mergeError.message })` :
+			merged.reason.replace( /\.$/, '' );
+		record( patch.key, file.path, STATUS.BASE_SKEW,
+			`Replaced the whole file ${ where }, because it would not merge: ` +
+			`${ why }${ lines ? ` (base line ${ lines })` : '' }. ` +
+			( drift ?
+				`That also removes ${ drift.onlyOurs } line(s) the wiki has (${ wiki.from }) ` +
+				`and adds ${ drift.onlyBase } line(s) from the patch base.` :
+				'The wiki copy is very different from the patch base.' ) );
+	}
+
+	/**
+	 * Handle a "new" file the module already has.
+	 *
+	 * The patch may be merged and deployed already, in which case running
+	 * the file again would register everything in it twice.
+	 *
+	 * @param {Object} mw
+	 * @param {Object} patch
+	 * @param {Object} file
+	 * @param {Object} script
+	 * @param {string} key
+	 * @param {string} moduleName
+	 */
+	function newFileAlreadyThere( mw, patch, file, script, key, moduleName ) {
+		const wiki = wikiCopyOf( mw, script.files[ key ], file );
+		if ( wiki && sameText( wiki.text, file.source ) ) {
+			record( patch.key, file.path, STATUS.APPLIED,
+				`Already on the wiki (${ wiki.from }), so left as it is.` );
+			return;
+		}
+		script.files[ key ] = compileFile( patch, file );
+		record( patch.key, file.path, STATUS.APPLIED,
+			`${ moduleName } already has a ${ key }. Replaced it with the patch's version.` );
 	}
 
 	/**
@@ -491,7 +624,7 @@
 					continue;
 				}
 				const key = hit.matches[ 0 ].key;
-				safely( replaceFileInPayload, patch, file, script, key, name );
+				safely( replaceFileInPayload, mw, patch, file, script, key, name );
 				anchors.push( { repoPath: file.path, module: name, key } );
 			}
 		}
@@ -509,7 +642,11 @@
 					continue;
 				}
 				insertedNewFiles.add( file );
-				safely( insertFileInPayload, patch, file, script, target.key, name );
+				if ( Object.prototype.hasOwnProperty.call( script.files, target.key ) ) {
+					safely( newFileAlreadyThere, mw, patch, file, script, target.key, name );
+				} else {
+					safely( insertFileInPayload, patch, file, script, target.key, name );
+				}
 			}
 		}
 	}

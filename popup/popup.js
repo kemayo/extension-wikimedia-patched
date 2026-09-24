@@ -11,6 +11,7 @@ const el = ( id ) => document.getElementById( id );
 const STATUS_LABEL = {
 	[ STATUS.APPLIED ]: [ 'applied', 's-good' ],
 	[ STATUS.APPLIED_NEW ]: [ 'added', 's-good' ],
+	[ STATUS.MERGED ]: [ 'merged', 's-good' ],
 	[ STATUS.STYLE_INJECTED ]: [ 'styled', 's-good' ],
 	[ STATUS.BASE_SKEW ]: [ 'base skew', 's-warn' ],
 	[ STATUS.AMBIGUOUS ]: [ 'ambiguous', 's-warn' ],

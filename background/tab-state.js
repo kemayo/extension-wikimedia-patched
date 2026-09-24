@@ -11,7 +11,9 @@ import { STATUS } from '../shared/constants.js';
 /** Tab id to the last report from that tab. */
 const byTab = new Map();
 
-const GOOD = new Set( [ STATUS.APPLIED, STATUS.APPLIED_NEW, STATUS.STYLE_INJECTED ] );
+const GOOD = new Set( [
+	STATUS.APPLIED, STATUS.APPLIED_NEW, STATUS.MERGED, STATUS.STYLE_INJECTED
+] );
 const BAD = new Set( [ STATUS.CONFLICT, STATUS.TIMED_OUT ] );
 const WARN = new Set( [
 	STATUS.BASE_SKEW, STATUS.AMBIGUOUS, STATUS.UNMATCHED, STATUS.STYLE_SKIPPED

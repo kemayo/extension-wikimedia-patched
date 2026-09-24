@@ -97,6 +97,8 @@ export const DEBUG_COOKIE = 'resourceLoaderDebug';
 export const STATUS = {
 	APPLIED: 'applied',
 	APPLIED_NEW: 'applied-new',
+	// Only the patch's changes, put onto the wiki's own copy of the file.
+	MERGED: 'merged',
 	BASE_SKEW: 'base-skew',
 	NOT_ON_PAGE: 'not-on-page',
 	AMBIGUOUS: 'ambiguous',

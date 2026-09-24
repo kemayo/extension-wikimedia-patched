@@ -13,6 +13,7 @@ import {
 import { parsePatchRef } from './gerrit.js';
 import { preparePatch } from './prepare.js';
 import { flattenStyle } from './less-resolve.js';
+import { rememberVersion, versionFor, withDeployed, withBudget } from './deployed.js';
 import { compileLess } from '../shared/less-compile.js';
 import * as store from './store.js';
 import {
@@ -190,6 +191,21 @@ async function diagnose( tabId ) {
 	};
 }
 
+/**
+ * Read the deployed copies for every active patch, to fill the cache.
+ *
+ * @param {string} version
+ */
+async function warmDeployed( version ) {
+	const patches = ( await store.getPatches() ).filter( ( p ) => p.enabled && p.reviewed );
+	await Promise.all( patches.map( async ( patch ) => {
+		const payload = await store.getCachedPayload( patch.key );
+		if ( payload ) {
+			await withDeployed( payload, version );
+		}
+	} ) );
+}
+
 /** Compiled stylesheets, keyed by patch, skin and wiki version. */
 const styleCache = new Map();
 
@@ -291,6 +307,18 @@ async function dispatch( msg, sender ) {
 			}
 			const result = await buildPagePayload( sender.origin );
 			if ( result.active ) {
+				// The wiki's own copy of each changed file, so the page can
+				// merge instead of replacing. Usually cached from the last
+				// visit; never allowed to delay the page for long.
+				const version = versionFor( sender.origin );
+				if ( version ) {
+					const enriched = await withBudget( Promise.all(
+						result.patches.map( ( p ) => withDeployed( p, version ) )
+					), 400 );
+					if ( enriched ) {
+						result.patches = enriched;
+					}
+				}
 				const settings = await store.getSettings();
 				if ( settings.debugStrategy === 'cookie' ) {
 					await enableDebug( sender.origin );
@@ -305,6 +333,12 @@ async function dispatch( msg, sender ) {
 		case MSG.REPORT_STATUS:
 			if ( sender.tab ) {
 				setTabStatus( sender.tab.id, msg.report );
+			}
+			if ( msg.report && msg.report.version && sender.origin ) {
+				rememberVersion( sender.origin, msg.report.version );
+				// Fetch the deployed files now, off the page's critical path,
+				// so the next load finds them cached.
+				warmDeployed( msg.report.version ).catch( () => {} );
 			}
 			return { ok: true };
 

@@ -133,8 +133,13 @@ export function createPage() {
  * with all three steps.
  *
  * @param {Object} page From createPage().
+ * @param {Object} [opts]
+ * @param {boolean} [opts.debug=true] Debug mode, as the startup module
+ *   signals it: maxQueryLength is 0. The fixtures are debug payloads, with
+ *   verbatim source, so this is the default.
  */
-export function bootMediaWiki( page ) {
+export function bootMediaWiki( page, { debug = true } = {} ) {
+	page.runScript( `var WMP_DEBUG = ${ debug ? 'true' : 'false' };` );
 	page.runScript( `
 		( function () {
 			function MwMap( values ) { this.values = values || {}; }
@@ -196,6 +201,7 @@ export function bootMediaWiki( page ) {
 
 			mw.loader = {
 				moduleRegistry: registry,
+				maxQueryLength: WMP_DEBUG ? 0 : 5000,
 				impl: function ( declarator ) {
 					var data = declarator();
 					var parts = String( data[ 0 ] ).split( '@' );
@@ -208,6 +214,16 @@ export function bootMediaWiki( page ) {
 						messages: data[ 3 ], packageExports: {},
 						module: { exports: {} }, state: 'loaded'
 					};
+				},
+				// Real load.php responses end by setting the state of the
+				// modules they carry, or of ones they could not find.
+				state: function ( states ) {
+					Object.keys( states ).forEach( function ( name ) {
+						if ( !registry[ name ] ) {
+							registry[ name ] = { packageExports: {}, module: { exports: {} } };
+						}
+						registry[ name ].state = states[ name ];
+					} );
 				},
 				getState: function ( name ) {
 					return registry[ name ] ? registry[ name ].state : null;

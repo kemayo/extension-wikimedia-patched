@@ -374,14 +374,15 @@ function modulePayload( name, main, files ) {
 const OLD_CONTROLLER = "mw.editcheck.log.push( 'controller v1' );";
 const OLD_INIT = "require( './controller.js' );";
 
-async function runEditCheckModule( payload ) {
+async function runEditCheckModule( payload, { files, debug = true } = {} ) {
 	const { page, reports } = await startPage( payload );
-	bootMediaWiki( page );
+	bootMediaWiki( page, { debug } );
 	page.runScript( 'mw.editcheck = { log: [] };' );
-	page.runScript( modulePayload( 'ext.visualEditor.editCheck', 'editcheck/modules/init.js', {
-		'editcheck/modules/controller.js': OLD_CONTROLLER,
-		'editcheck/modules/init.js': OLD_INIT
-	} ) );
+	page.runScript( modulePayload( 'ext.visualEditor.editCheck', 'editcheck/modules/init.js',
+		files || {
+			'editcheck/modules/controller.js': OLD_CONTROLLER,
+			'editcheck/modules/init.js': OLD_INIT
+		} ) );
 	await page.flush( 10 );
 	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
 	await page.flush( 100 );
@@ -405,40 +406,6 @@ test( 'a changed file is replaced before the module runs', async () => {
 		.find( ( f ) => f.path === 'editcheck/modules/controller.js' );
 	assert.equal( row.status, 'applied' );
 	assert.match( row.reason, /runs the patch base/ );
-} );
-
-test( 'a patch written against a different base is applied and flagged', async () => {
-	const { page, reports } = await runEditCheckModule( patchWith( {
-		replaceFiles: [ {
-			path: 'editcheck/modules/controller.js',
-			kind: 'js',
-			// The wiki runs something else, as a wmf branch would.
-			parentSource: "mw.editcheck.log.push( 'controller v0' );",
-			source: "mw.editcheck.log.push( 'controller v2' );"
-		} ]
-	} ) );
-
-	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ],
-		'skew warns, it does not block' );
-	const row = reports.at( -1 ).files
-		.find( ( f ) => f.path === 'editcheck/modules/controller.js' );
-	assert.equal( row.status, 'base-skew' );
-	assert.match( row.reason, /different version/ );
-} );
-
-test( 'an unverifiable base is applied and said to be unchecked', async () => {
-	const { reports } = await runEditCheckModule( patchWith( {
-		replaceFiles: [ {
-			path: 'editcheck/modules/controller.js',
-			kind: 'js',
-			parentSource: null,
-			source: "mw.editcheck.log.push( 'controller v2' );"
-		} ]
-	} ) );
-	const row = reports.at( -1 ).files
-		.find( ( f ) => f.path === 'editcheck/modules/controller.js' );
-	assert.equal( row.status, 'applied' );
-	assert.match( row.reason, /not in debug mode/ );
 } );
 
 test( 'a new file is required by the module main file, in order', async () => {
@@ -574,4 +541,173 @@ test( 'a stylesheet that will not build says why', async () => {
 		.find( ( f ) => f.path === 'editcheck/modules/styles/X.less' );
 	assert.equal( row.status, 'style-skipped' );
 	assert.match( row.reason, /npm install less/ );
+} );
+
+// ------------------------------------------------------------------- skew
+
+/**
+ * A controller file in three versions, like a real skewed patch: the base
+ * the patch was written on, the wiki's older branch copy, and the patch.
+ * Each line logs, so the test can see exactly which code ran.
+ */
+const log = ( ...names ) => names.map( ( n ) => `mw.editcheck.log.push( '${ n }' );` ).join( '\n' );
+const SKEW_BASE = log( 'one', 'two', 'three', 'four', 'five', 'six' );
+// The branch was cut before master changed line two.
+const SKEW_WIKI = log( 'one', 'two-old', 'three', 'four', 'five', 'six' );
+// The patch changes line five only.
+const SKEW_PATCH = log( 'one', 'two', 'three', 'four', 'five-patched', 'six' );
+
+function skewPatch( overrides = {} ) {
+	return patchWith( {
+		replaceFiles: [ {
+			path: 'editcheck/modules/controller.js',
+			kind: 'js',
+			parentSource: SKEW_BASE,
+			source: SKEW_PATCH,
+			...overrides
+		} ]
+	} );
+}
+
+const skewFiles = ( controller ) => ( {
+	'editcheck/modules/controller.js': controller,
+	'editcheck/modules/init.js': OLD_INIT
+} );
+
+function rowFor( reports, path ) {
+	return reports.at( -1 ).files.find( ( f ) => f.path === path );
+}
+
+test( 'on a skewed wiki only the patch changes are applied', async () => {
+	const { page, reports } = await runEditCheckModule( skewPatch(),
+		{ files: skewFiles( SKEW_WIKI ) } );
+
+	// "two-old" stays, because that is what the wiki runs. Replacing the
+	// whole file would have run master's "two" instead.
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two-old', 'three', 'four', 'five-patched', 'six' ] );
+	const row = rowFor( reports, 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'merged' );
+	assert.match( row.reason, /the running page/ );
+} );
+
+test( 'a merge that conflicts replaces the file and says what that costs', async () => {
+	// The wiki changed line five too, differently.
+	const wiki = log( 'one', 'two', 'three', 'four', 'five-backport', 'six' );
+	const { page, reports } = await runEditCheckModule( skewPatch(),
+		{ files: skewFiles( wiki ) } );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two', 'three', 'four', 'five-patched', 'six' ] );
+	const row = rowFor( reports, 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'base-skew' );
+	assert.match( row.reason, /would not merge/ );
+	assert.match( row.reason, /removes 1 line\(s\) the wiki has/ );
+} );
+
+test( 'a wiki that already runs the patch is left alone', async () => {
+	const { page, reports } = await runEditCheckModule( skewPatch(),
+		{ files: skewFiles( SKEW_PATCH ) } );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two', 'three', 'four', 'five-patched', 'six' ] );
+	const row = rowFor( reports, 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'applied' );
+	assert.match( row.reason, /Already on the wiki/ );
+} );
+
+test( 'a wiki on the patch base gets the patched file', async () => {
+	const { page, reports } = await runEditCheckModule( skewPatch(),
+		{ files: skewFiles( SKEW_BASE ) } );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two', 'three', 'four', 'five-patched', 'six' ] );
+	assert.match( rowFor( reports, 'editcheck/modules/controller.js' ).reason,
+		/runs the patch base/ );
+} );
+
+test( 'without debug mode the deployed branch copy is used instead', async () => {
+	// The live code is "minified" here: it must not be trusted.
+	const { page, reports } = await runEditCheckModule(
+		skewPatch( { deployed: { ref: 'wmf/1.47.0-wmf.20', source: SKEW_WIKI } } ),
+		{ files: skewFiles( SKEW_WIKI ), debug: false } );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two-old', 'three', 'four', 'five-patched', 'six' ] );
+	const row = rowFor( reports, 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'merged' );
+	assert.match( row.reason, /wmf\/1\.47\.0-wmf\.20/ );
+} );
+
+test( 'without debug mode or a branch copy, the base is not checked', async () => {
+	const { page, reports } = await runEditCheckModule( skewPatch(),
+		{ files: skewFiles( SKEW_WIKI ), debug: false } );
+	// Whole-file replacement is the only choice left.
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two', 'three', 'four', 'five-patched', 'six' ] );
+	const row = rowFor( reports, 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'applied' );
+	assert.match( row.reason, /not checked/ );
+} );
+
+test( 'a patch with no base from Gerrit is replaced and says so', async () => {
+	const { reports } = await runEditCheckModule( skewPatch( { parentSource: null } ),
+		{ files: skewFiles( SKEW_WIKI ) } );
+	assert.match( rowFor( reports, 'editcheck/modules/controller.js' ).reason,
+		/no base to compare/ );
+} );
+
+test( 'an added file the wiki already has is not registered twice', async () => {
+	// The patch is merged and deployed: its new file is in the module.
+	const already = "mw.editcheck.registered.push( 'SourceVerification' );";
+	const { page, reports } = await startPage( patchWith( {
+		newFiles: [ {
+			path: 'editcheck/modules/editchecks/checks/SourceVerificationEditCheck.js',
+			kind: 'js',
+			siblings: [ 'AddReferenceEditCheck.js', 'init.js' ],
+			source: already
+		} ]
+	} ) );
+	bootMediaWiki( page );
+	page.runScript( 'mw.editcheck = { registered: [] };' );
+	page.runScript( modulePayload( 'ext.visualEditor.editCheck.checks', 'init.js', {
+		'AddReferenceEditCheck.js': "mw.editcheck.registered.push( 'AddReference' );",
+		'SourceVerificationEditCheck.js': already,
+		'init.js': "require( './AddReferenceEditCheck.js' );\n" +
+			"require( './SourceVerificationEditCheck.js' );"
+	} ) );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck.checks' );
+	await page.flush( 100 );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.registered' ) ],
+		[ 'AddReference', 'SourceVerification' ] );
+	const row = rowFor( reports,
+		'editcheck/modules/editchecks/checks/SourceVerificationEditCheck.js' );
+	assert.match( row.reason, /Already on the wiki/ );
+} );
+
+test( 'the page tells the worker which version it runs', async () => {
+	const { page, reports } = await runEditCheckModule( skewPatch(),
+		{ files: skewFiles( SKEW_BASE ) } );
+	page.runScript( 'mw.config.set( "wgVersion", "1.47.0-wmf.20" );' );
+	page.runScript( 'window.dispatchEvent( { type: "load" } );' );
+	await page.flush( 1700 );
+	assert.equal( reports.at( -1 ).version, '1.47.0-wmf.20' );
+} );
+
+test( 'a clean merge that is not valid code is never run', async () => {
+	// Each side is valid alone, and the lines are far apart, so the merge is
+	// clean. But both declare q, and together they do not parse.
+	const base = log( 'one', 'two', 'three', 'four', 'five', 'six' );
+	const wiki = base.replace( "mw.editcheck.log.push( 'one' );", 'const q = 1;' );
+	const patch = base.replace( "mw.editcheck.log.push( 'five' );", 'const q = 2;' );
+	const { page, reports } = await runEditCheckModule(
+		patchWith( { replaceFiles: [ {
+			path: 'editcheck/modules/controller.js', kind: 'js', parentSource: base, source: patch
+		} ] } ),
+		{ files: skewFiles( wiki ) } );
+
+	// The patched file ran whole; the broken merge did not run at all.
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two', 'three', 'four', 'six' ] );
+	const row = rowFor( reports, 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'base-skew' );
+	assert.match( row.reason, /not valid JavaScript/ );
 } );

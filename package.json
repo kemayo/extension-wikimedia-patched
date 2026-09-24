@@ -8,7 +8,8 @@
 		"build": "node build.mjs",
 		"test": "npm run build && node --test \"test/*.test.js\"",
 		"smoke": "node scripts/gerrit-smoke.mjs",
-		"smoke:less": "node scripts/less-smoke.mjs"
+		"smoke:less": "node scripts/less-smoke.mjs",
+		"smoke:skew": "node scripts/skew-smoke.mjs"
 	},
 	"dependencies": {
 		"less": "^4.9.1"

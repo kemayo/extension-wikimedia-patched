@@ -93,6 +93,7 @@ npm run build          # writes dist/chrome and dist/firefox
 npm test               # unit tests, no network
 npm run smoke          # reads a real change from gerrit.wikimedia.org
 npm run smoke:less     # resolves that change's stylesheet imports
+npm run smoke:skew     # merges that change onto enwiki's live module
 ```
 
 The build vendors `node_modules/less/lib/less` into `vendor/` when it is
@@ -121,10 +122,43 @@ module. It hooks `window.mw`, then `mw.loader`, then wraps `mw.loader.impl`.
 The wrapper calls the declarator, swaps whole files in the returned data, and
 re-wraps it. Nothing in ResourceLoader checks module content, so this works.
 
-Whole files come from Gerrit, not diff hunks. Reading the **parent** revision
-of the same file gives a free check: if it matches the live payload exactly,
-the replacement is certainly right. If it does not, the wiki runs a different
-base and the popup says so.
+## When the wiki runs a different base
+
+A patch is written against master. A wiki runs a wmf branch cut some days
+earlier. So the file the patch changes is usually not the file the wiki has,
+and replacing it whole would also bring in every unrelated master change
+since the cut — and undo any backport the branch got.
+
+So the extension does a three-way merge (`shared/merge3.js`): it takes only
+the patch's own changes, base to patched, and puts them onto the wiki's copy.
+The wiki's copy comes from the best source there is:
+
+1. **The running page**, in debug mode. The payload holds each file
+   verbatim, so this is exactly what the wiki runs. No network needed.
+2. **The wmf branch**, otherwise. The page reports `wgVersion`, and the
+   worker fetches that branch's copy in the background, so the next load has
+   it. Master is never used as a stand-in: it is not what the wiki runs.
+
+Then, per file:
+
+| The wiki's copy is… | The extension… | Status |
+|---|---|---|
+| the patched file | leaves it alone — the patch is already live | applied |
+| the patch base | replaces it | applied |
+| something else, and the merge is clean | runs the merge | merged |
+| something else, and the merge conflicts | replaces it, and says how many wiki lines that drops | base-skew |
+| unknown | replaces it, and says the base was not checked | applied |
+
+The merge is conservative: edits on the same or adjacent lines count as a
+conflict, as in diff3. A false conflict costs a warning; a false clean merge
+would cost broken code in silence. A clean merge that does not parse as
+JavaScript is not run either.
+
+For change 1321624 on enwiki today, all three changed files merge cleanly.
+`EditCheckActionWidget.js` shows why it matters: replacing it whole would
+have removed 13 lines enwiki runs and added 20 unrelated lines from master,
+on top of the patch. `npm run smoke:skew` runs the patch against the module
+enwiki is serving right now.
 
 ## What is verified, and what is not
 

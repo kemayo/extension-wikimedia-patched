@@ -12,8 +12,29 @@
 import { GERRIT_BASE } from '../shared/constants.js';
 import { decodeBase64Utf8 } from './gerrit.js';
 
-/** A file at a commit never changes, so every answer is kept. */
+/**
+ * A file at a commit never changes, so that answer is kept for good. A
+ * branch moves, most often when a fix is backported to a wmf branch, so a
+ * branch answer is kept only for a while.
+ */
 const cache = new Map();
+const BRANCH_TTL_MS = 10 * 60 * 1000;
+
+function cacheGet( key, ref ) {
+	const hit = cache.get( key );
+	if ( !hit ) {
+		return undefined;
+	}
+	if ( !isCommit( ref ) && Date.now() - hit.at > BRANCH_TTL_MS ) {
+		cache.delete( key );
+		return undefined;
+	}
+	return hit.value;
+}
+
+function cacheSet( key, value ) {
+	cache.set( key, { value, at: Date.now() } );
+}
 const RETRY_DELAYS_MS = [ 300, 900 ];
 
 const sleep = ( ms ) => new Promise( ( resolve ) => setTimeout( resolve, ms ) );
@@ -33,8 +54,9 @@ function isCommit( ref ) {
  */
 export async function readRepoFile( project, ref, path ) {
 	const key = `${ project }\u0000${ ref }\u0000${ path }`;
-	if ( cache.has( key ) ) {
-		return cache.get( key );
+	const cached = cacheGet( key, ref );
+	if ( cached !== undefined ) {
+		return cached;
 	}
 
 	const kind = isCommit( ref ) ? 'commits' : 'branches';
@@ -50,7 +72,7 @@ export async function readRepoFile( project, ref, path ) {
 			return null;
 		}
 		if ( res.status === 404 ) {
-			cache.set( key, null );
+			cacheSet( key, null );
 			return null;
 		}
 		if ( ( res.status === 429 || res.status === 503 ) &&
@@ -62,7 +84,7 @@ export async function readRepoFile( project, ref, path ) {
 			return null;
 		}
 		const text = decodeBase64Utf8( await res.text() );
-		cache.set( key, text );
+		cacheSet( key, text );
 		return text;
 	}
 }
@@ -102,16 +124,41 @@ export async function pickRef( project, refs ) {
 		if ( !ref ) {
 			continue;
 		}
+		if ( await branchExists( project, ref ) ) {
+			return ref;
+		}
+	}
+	return 'master';
+}
+
+/**
+ * Say whether a branch exists. Cached like a branch file.
+ *
+ * @param {string} project
+ * @param {string} ref
+ * @return {Promise<boolean>}
+ */
+export async function branchExists( project, ref ) {
+	if ( ref === 'master' ) {
+		return true;
+	}
+	const key = `branch\u0000${ project }\u0000${ ref }`;
+	const cached = cacheGet( key, ref );
+	if ( cached !== undefined ) {
+		return cached;
+	}
+	{
 		const url = `${ GERRIT_BASE }/projects/${ encodeURIComponent( project ) }/` +
 			`branches/${ encodeURIComponent( ref ) }`;
 		try {
 			const res = await fetch( url, { credentials: 'omit' } );
-			if ( res.ok ) {
-				return ref;
+			// Only a clear answer is cached. A network failure is not "no".
+			if ( res.ok || res.status === 404 ) {
+				cacheSet( key, res.ok );
 			}
+			return res.ok;
 		} catch ( e ) {
-			// Try the next one.
+			return false;
 		}
 	}
-	return 'master';
 }
