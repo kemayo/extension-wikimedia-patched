@@ -345,6 +345,14 @@ function applyStackCheck( check ) {
 			}
 			box.append( line );
 		}
+		const pinned = lastState && lastState.patches.find( ( p ) => p.key === node.dataset.key );
+		if ( pinned && info.latest && info.latest > pinned.patchset ) {
+			const line = document.createElement( 'p' );
+			line.className = 'need-bad';
+			line.textContent = `PS${ info.latest } is newer than PS${ pinned.patchset }.`;
+			line.append( addButton( `${ pinned.changeNumber }/${ info.latest }`, 'Update' ) );
+			box.append( line );
+		}
 		if ( info.base && info.base.unavailable ) {
 			const line = document.createElement( 'p' );
 			line.className = 'need-note';
@@ -389,10 +397,10 @@ function baseList( base, branch ) {
 	return details;
 }
 
-function addButton( input ) {
+function addButton( input, label = 'Add' ) {
 	const button = document.createElement( 'button' );
 	button.type = 'button';
-	button.textContent = 'Add';
+	button.textContent = label;
 	button.className = 'add-dependency';
 	button.dataset.input = input;
 	return button;
@@ -458,6 +466,26 @@ el( 'master-toggle' ).addEventListener( 'change', async ( ev ) => {
 	render();
 } );
 
+/**
+ * Add a patch, open it, and say if it replaced another patchset.
+ *
+ * @param {string} input
+ */
+async function addPatch( input ) {
+	const { payload, replaced } = await send( MSG.ADD_PATCH, { input } );
+	// Open the new patch, so its review box is in view.
+	expanded.add( payload.key );
+	const note = el( 'add-note' );
+	if ( replaced ) {
+		note.textContent = `Replaced PS${ replaced.split( '@' )[ 1 ] } of ` +
+			`${ payload.changeNumber } with PS${ payload.patchset }. Review it again.`;
+		note.hidden = false;
+	} else {
+		note.hidden = true;
+	}
+	await render();
+}
+
 el( 'add-form' ).addEventListener( 'submit', async ( ev ) => {
 	ev.preventDefault();
 	const input = el( 'add-input' );
@@ -466,11 +494,8 @@ el( 'add-form' ).addEventListener( 'submit', async ( ev ) => {
 	error.hidden = true;
 	button.disabled = true;
 	try {
-		const { payload } = await send( MSG.ADD_PATCH, { input: input.value } );
+		await addPatch( input.value );
 		input.value = '';
-		// Open the new patch, so its review box is in view.
-		expanded.add( payload.key );
-		await render();
 	} catch ( e ) {
 		error.textContent = e.message;
 		error.hidden = false;
@@ -489,9 +514,7 @@ el( 'patch-list' ).addEventListener( 'click', async ( ev ) => {
 	if ( ev.target.matches( '.add-dependency' ) ) {
 		ev.target.disabled = true;
 		try {
-			const { payload } = await send( MSG.ADD_PATCH, { input: ev.target.dataset.input } );
-			expanded.add( payload.key );
-			await render();
+			await addPatch( ev.target.dataset.input );
 		} catch ( e ) {
 			ev.target.disabled = false;
 			ev.target.title = e.message;

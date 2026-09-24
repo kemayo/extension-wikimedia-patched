@@ -10,7 +10,8 @@ import { ext } from '../shared/webext.js';
 import {
 	BUILD_ID, MSG, DEV_WIKI_MATCHES, PROD_WIKI_MATCHES, NON_WIKI_MATCHES
 } from '../shared/constants.js';
-import { parsePatchRef } from './gerrit.js';
+import { parsePatchRef, gerritGet } from './gerrit.js';
+import { planAdd, latestPatchset } from './patch-list.js';
 import { preparePatch } from './prepare.js';
 import { flattenStyle } from './less-resolve.js';
 import { rememberVersion, versionFor, withDeployed, withBudget } from './deployed.js';
@@ -74,7 +75,7 @@ async function handleAddPatch( input ) {
 	}
 	const payload = await preparePatch( ref );
 	await store.setCachedPayload( payload.key, payload );
-	await store.addPatch( {
+	const plan = planAdd( await store.getPatches(), {
 		key: payload.key,
 		changeNumber: payload.changeNumber,
 		patchset: payload.patchset,
@@ -92,7 +93,13 @@ async function handleAddPatch( input ) {
 		enabled: false,
 		addedAt: Date.now()
 	} );
-	return payload;
+	if ( plan.added ) {
+		await store.setPatches( plan.patches );
+	}
+	if ( plan.replaced ) {
+		await store.clearCachedPayload( plan.replaced.key );
+	}
+	return { payload, replaced: plan.replaced ? plan.replaced.key : null };
 }
 
 /** Refreshes in flight, so many callers share one read of Gerrit. */
@@ -307,10 +314,31 @@ async function checkStack( tabId ) {
 				commits: range.commits.slice( 0, 50 )
 			} : { unavailable: true };
 		}
-		perPatch[ patch.key ] = { deps: dependencyReport( patch, patches, deployed ), base };
+		perPatch[ patch.key ] = {
+			deps: dependencyReport( patch, patches, deployed ),
+			base,
+			latest: await latestFor( patch.changeNumber )
+		};
 	} ) );
 
 	return { origin, version, branch, perPatch };
+}
+
+/** Newest patchset per change, for a few minutes: authors push often. */
+const latestCache = new Map();
+
+async function latestFor( changeNumber ) {
+	const hit = latestCache.get( changeNumber );
+	if ( hit && Date.now() - hit.at < 5 * 60 * 1000 ) {
+		return hit.value;
+	}
+	let value = null;
+	try {
+		value = latestPatchset( await gerritGet(
+			`changes/${ encodeURIComponent( changeNumber ) }?o=CURRENT_REVISION` ) );
+	} catch ( e ) {}
+	latestCache.set( changeNumber, { value, at: Date.now() } );
+	return value;
 }
 
 /** Compiled stylesheets, keyed by patch, skin and wiki version. */
@@ -415,7 +443,7 @@ async function dispatch( msg, sender ) {
 		}
 
 		case MSG.ADD_PATCH:
-			return { payload: await handleAddPatch( msg.input ) };
+			return await handleAddPatch( msg.input );
 
 		case MSG.REMOVE_PATCH:
 			return { patches: await store.removePatch( msg.key ) };

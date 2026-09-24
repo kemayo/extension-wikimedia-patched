@@ -30,16 +30,6 @@ export async function setPatches( patches ) {
 	await ext.storage.local.set( { [ LOCAL_KEY ]: patches } );
 }
 
-export async function addPatch( patch ) {
-	const patches = await getPatches();
-	if ( patches.some( ( p ) => p.key === patch.key ) ) {
-		return patches;
-	}
-	patches.push( patch );
-	await setPatches( patches );
-	return patches;
-}
-
 export async function removePatch( key ) {
 	const patches = ( await getPatches() ).filter( ( p ) => p.key !== key );
 	await setPatches( patches );
