@@ -24,6 +24,7 @@
 	// @include shared/resolve-module.js
 	// @include shared/verify-base.js
 	// @include shared/merge3.js
+	// @include shared/source-text.js
 
 	// ---------------------------------------------------------------- channel
 
@@ -406,7 +407,7 @@
 	function compileFile( patch, file ) {
 		const sourceUrl = `wikimedia-patched://${ patch.changeNumber }/${ file.path }`;
 		return new Function( 'require', 'module', 'exports',
-			file.source + '\n//# sourceURL=' + sourceUrl + '\n' );
+			stripSourceMapComments( file.source ) + '\n//# sourceURL=' + sourceUrl + '\n' );
 	}
 
 	/**
@@ -460,7 +461,7 @@
 	function parses( text ) {
 		try {
 			// eslint-disable-next-line no-new, no-new-func
-			new Function( text );
+			new Function( stripSourceMapComments( text ) );
 			return true;
 		} catch ( e ) {
 			return false;
@@ -777,7 +778,8 @@
 		if ( placements.length ) {
 			const sourceUrl = `wikimedia-patched://module/${ name }`;
 			try {
-				data[ 1 ] = new Function( ...params, body + '\n//# sourceURL=' + sourceUrl + '\n' );
+				data[ 1 ] = new Function( ...params,
+					stripSourceMapComments( body ) + '\n//# sourceURL=' + sourceUrl + '\n' );
 			} catch ( e ) {
 				// Each file parsed alone, but the whole does not. Run nothing
 				// changed rather than something broken.

@@ -1009,3 +1009,32 @@ test( 'a splice that breaks the combined script is not run', async () => {
 	assert.equal( row.status, 'base-skew' );
 	assert.match( row.reason, /not valid JavaScript/ );
 } );
+
+test( 'a rebuilt module carries no source map that would break the CSP', async () => {
+	// ext.visualEditor.core has DOMPurify inside, with a relative source map
+	// comment. Resolved against the patched module's sourceURL it became
+	// wikimedia-patched://module/purify.js.map, which the wiki's CSP blocks.
+	const dompurify = veFile( 'Purify' ) + '//# sourceMappingURL=purify.js.map\n';
+	const { page, log } = await runVeCore( [ vePatch( 'P', {
+		parent: veFile( 'LinearData' ),
+		source: veFile( 'LinearData', '-patched' ) + '//# sourceMappingURL=LinearData.js.map\n'
+	} ) ], { files: [ dompurify, veFile( 'LinearData' ), veFile( 'Node' ) ] } );
+
+	assert.deepEqual( log(), [ 'Purify', 'LinearData-patched', 'Node' ] );
+	const rebuilt = String( page.window.mw.loader.moduleRegistry[ 'ext.visualEditor.core' ].script );
+	assert.doesNotMatch( rebuilt, /sourceMappingURL/ );
+	assert.match( rebuilt, /sourceURL=wikimedia-patched:\/\/module\/ext\.visualEditor\.core/ );
+} );
+
+test( 'a replaced package file carries no source map either', async () => {
+	const { page } = await runEditCheckModule( patchWith( {
+		replaceFiles: [ {
+			path: 'editcheck/modules/controller.js', kind: 'js', parentSource: OLD_CONTROLLER,
+			source: "mw.editcheck.log.push( 'controller v2' );\n//# sourceMappingURL=controller.js.map"
+		} ]
+	} ) );
+	const fn = page.window.mw.loader.moduleRegistry[ 'ext.visualEditor.editCheck' ]
+		.script.files[ 'editcheck/modules/controller.js' ];
+	assert.doesNotMatch( String( fn ), /sourceMappingURL/ );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ] );
+} );
