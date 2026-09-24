@@ -127,11 +127,48 @@ XPI through AMO's unlisted channel, add your AMO API key as the repository
 secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. Without them the release has
 the Firefox zip only, which loads as a temporary add-on.
 
+### Installing a release
+
+Download the file for your browser from the
+[releases page](https://github.com/kemayo/extension-wikimedia-patched/releases).
+
+**Chrome** (`wikimedia-patched-chrome-*.zip`)
+
+1. Unzip it into a folder you will keep. Chrome loads the extension from
+   that folder each time it starts, so do not delete it.
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and pick the folder.
+
+To update, replace the folder's contents with the new release and click the
+reload arrow on the extension's card. If Developer mode is greyed out, your
+browser is managed by a policy that forbids unpacked extensions.
+
+**Firefox, signed** (`wikimedia-patched-firefox-*.xpi`)
+
+1. Open `about:addons`.
+2. Click the gear icon, then **Install Add-on From File...**, and pick the
+   `.xpi`.
+
+It stays installed across restarts. To update, install the newer `.xpi` the
+same way.
+
+**Firefox, unsigned** (`wikimedia-patched-firefox-*.zip`)
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on...** and pick the zip.
+
+Firefox removes it when it closes, so this is for trying a build, not for
+daily use.
+
+**After installing**, development wikis work at once. To patch a production
+wiki, grant it on the options page, then use **Allow and reload** in the
+popup on that wiki.
+
 ## How it works
 
 ResourceLoader delivers a module as `mw.loader.impl(declarator)`, where
 `declarator` returns `[key, script, styles, messages, templates]`. For a
-`packageFiles` module the script is `{main, files: {"path.js": function(…){…}}}`.
+`packageFiles` module the script is `{main, files: {"path.js": function(...){...}}}`.
 
 A `world: "MAIN"` content script runs at `document_start`, before the startup
 module. It hooks `window.mw`, then `mw.loader`, then wraps `mw.loader.impl`.
@@ -226,7 +263,7 @@ The wiki's copy comes from the best source there is:
 
 Then, per file:
 
-| The wiki's copy is… | The extension… | Status |
+| The wiki's copy is... | The extension... | Status |
 |---|---|---|
 | the patched file | leaves it alone — the patch is already live | applied |
 | the patch base | replaces it | applied |
@@ -281,7 +318,7 @@ Not verified, because it needs a real browser:
   requested.
 - Whether `world: "MAIN"` content scripts really run before the startup
   module in Firefox. If they do not, the fallback is the
-  `<script src=moz-extension://…>` injection, which is not written yet.
+  `<script src=moz-extension://...>` injection, which is not written yet.
 - The production permission prompt.
 - Whether a background service worker imports the vendored compiler the same
   way Node does. Node has no `document` either, which is why the vendored
