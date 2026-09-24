@@ -1223,6 +1223,14 @@
 	 * A developer debugging "the patch did nothing" reaches for the console
 	 * before the popup, so the answer has to be there too.
 	 */
+	/** Inactive for a reason the user chose: say nothing. */
+	const QUIET_REASONS = new Set( [ null, 'switched-off', 'not-a-wiki' ] );
+	/** Waiting for the user: say so, but it is not a fault. */
+	const NOTICE_REASONS = {
+		'production-not-acknowledged':
+			'patches are waiting: confirm this production wiki in the extension popup.'
+	};
+
 	function logSummary() {
 		const tag = '[WikimediaPatched]';
 		if ( !payload ) {
@@ -1231,8 +1239,19 @@
 			return;
 		}
 		if ( !payload.active ) {
+			const reason = payload.reason || null;
+			if ( QUIET_REASONS.has( reason ) ) {
+				// The user chose this. Saying so on every page is noise.
+				return;
+			}
+			if ( NOTICE_REASONS[ reason ] ) {
+				// eslint-disable-next-line no-console
+				console.info( tag, NOTICE_REASONS[ reason ] );
+				return;
+			}
+			// Anything else means the extension failed to do its job.
 			// eslint-disable-next-line no-console
-			console.warn( tag, 'no patch applied:', payload.reason || 'nothing enabled' );
+			console.warn( tag, 'no patch applied:', reason );
 			return;
 		}
 		const counts = {};

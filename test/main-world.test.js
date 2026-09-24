@@ -1038,3 +1038,42 @@ test( 'a replaced package file carries no source map either', async () => {
 	assert.doesNotMatch( String( fn ), /sourceMappingURL/ );
 	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ] );
 } );
+
+// ---------------------------------------------------------------- logging
+
+/** Run a page to the end, with a console that records what it was given. */
+async function logsFor( payload ) {
+	const logged = [];
+	const record = ( level ) => ( ...args ) => logged.push( { level, text: args.join( ' ' ) } );
+	const page = createPage( { console: {
+		log: record( 'log' ), info: record( 'info' ), warn: record( 'warn' ), error: record( 'error' )
+	} } );
+	page.runFile( MAIN_WORLD );
+	const channel = page.document.documentElement.dataset.wmpChannel;
+	page.runScript(
+		`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':in' ) }, ` +
+		`{ detail: ${ JSON.stringify( payload ) } } ) );` );
+	bootMediaWiki( page );
+	page.runScript( 'window.dispatchEvent( { type: "load" } );' );
+	await page.flush( 1700 );
+	return logged.filter( ( l ) => l.text.includes( '[WikimediaPatched]' ) );
+}
+
+for ( const reason of [ 'switched-off', 'not-a-wiki', null ] ) {
+	test( `an inactive page says nothing when the reason is ${ reason }`, async () => {
+		assert.deepEqual( await logsFor( { active: false, reason, patches: [] } ), [] );
+	} );
+}
+
+test( 'a production wiki waiting for confirmation is a notice, not a warning', async () => {
+	const logs = await logsFor( { active: false, reason: 'production-not-acknowledged', patches: [] } );
+	assert.deepEqual( logs.map( ( l ) => l.level ), [ 'info' ] );
+	assert.match( logs[ 0 ].text, /confirm this production wiki/ );
+} );
+
+for ( const reason of [ 'timed-out', 'error', 'no-worker', 'something-new' ] ) {
+	test( `a failure still warns (${ reason })`, async () => {
+		const logs = await logsFor( { active: false, reason, patches: [] } );
+		assert.deepEqual( logs.map( ( l ) => l.level ), [ 'warn' ] );
+	} );
+}

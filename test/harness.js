@@ -72,7 +72,7 @@ function makeElement( tag ) {
  *
  * @return {Object} { context, document, window, bootMediaWiki, runScript, flush }
  */
-export function createPage() {
+export function createPage( { console: pageConsole = console } = {} ) {
 	const documentElement = makeElement( 'html' );
 	const head = makeElement( 'head' );
 	const body = makeElement( 'body' );
@@ -92,7 +92,7 @@ export function createPage() {
 	window.document = document;
 
 	const sandbox = window;
-	sandbox.console = console;
+	sandbox.console = pageConsole;
 	sandbox.setTimeout = setTimeout;
 	sandbox.clearTimeout = clearTimeout;
 	sandbox.Math = Math;
