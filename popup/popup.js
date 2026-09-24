@@ -191,6 +191,17 @@ function fileRowsFor( payload, report ) {
 	return rows;
 }
 
+/**
+ * Patches whose details are open.
+ *
+ * Every change re-renders the list, so this must outlive a render, or
+ * ticking the review box would close the patch being reviewed. A patch
+ * that is not reviewed yet starts open, because it does nothing until the
+ * review box is ticked.
+ */
+const expanded = new Set();
+const seenKeys = new Set();
+
 function renderPatch( patch, payload, report ) {
 	const node = el( 'patch-template' ).content.firstElementChild.cloneNode( true );
 	node.dataset.key = patch.key;
@@ -201,8 +212,8 @@ function renderPatch( patch, payload, report ) {
 	subject.href = `${ GERRIT_BASE }/c/${ patch.project }/+/${ patch.changeNumber }/${ patch.patchset }`;
 
 	node.querySelector( '.patch-meta' ).textContent =
-		`${ patch.project } · PS${ patch.patchset } · ${ patch.owner }` +
-		( patch.changeStatus === 'MERGED' ? ' · merged' : '' );
+		`${ patch.project } \u00b7 PS${ patch.patchset } \u00b7 ${ patch.owner }` +
+		( patch.changeStatus === 'MERGED' ? ' \u00b7 merged' : '' );
 
 	const enabled = node.querySelector( '.patch-enabled' );
 	enabled.checked = patch.enabled;
@@ -213,6 +224,16 @@ function renderPatch( patch, payload, report ) {
 
 	const reviewed = node.querySelector( '.patch-reviewed' );
 	reviewed.checked = patch.reviewed;
+
+	if ( !seenKeys.has( patch.key ) ) {
+		seenKeys.add( patch.key );
+		if ( !patch.reviewed ) {
+			expanded.add( patch.key );
+		}
+	}
+	const open = expanded.has( patch.key );
+	node.querySelector( '.patch-body' ).hidden = !open;
+	node.querySelector( '.patch-expand' ).textContent = open ? '\u25be' : '\u25b8';
 
 	const notes = node.querySelector( '.notes' );
 	if ( payload && payload.notes.length ) {
@@ -240,14 +261,6 @@ async function render() {
 
 	el( 'master-toggle' ).checked = state.enabled;
 	el( 'master-label' ).textContent = state.enabled ? 'On' : 'Off';
-
-	const note = el( 'site-note' );
-	if ( report && report.siteNote ) {
-		note.textContent = report.siteNote;
-		note.hidden = false;
-	} else {
-		note.hidden = true;
-	}
 
 	renderElevatedWarning( report );
 
@@ -330,8 +343,10 @@ el( 'add-form' ).addEventListener( 'submit', async ( ev ) => {
 	error.hidden = true;
 	button.disabled = true;
 	try {
-		await send( MSG.ADD_PATCH, { input: input.value } );
+		const { payload } = await send( MSG.ADD_PATCH, { input: input.value } );
 		input.value = '';
+		// Open the new patch, so its review box is in view.
+		expanded.add( payload.key );
 		await render();
 	} catch ( e ) {
 		error.textContent = e.message;
@@ -351,7 +366,12 @@ el( 'patch-list' ).addEventListener( 'click', async ( ev ) => {
 	if ( ev.target.matches( '.patch-expand' ) ) {
 		const body = item.querySelector( '.patch-body' );
 		body.hidden = !body.hidden;
-		ev.target.textContent = body.hidden ? '▸' : '▾';
+		ev.target.textContent = body.hidden ? '\u25b8' : '\u25be';
+		if ( body.hidden ) {
+			expanded.delete( key );
+		} else {
+			expanded.add( key );
+		}
 	} else if ( ev.target.matches( '.patch-remove' ) ) {
 		await send( MSG.REMOVE_PATCH, { key } );
 		render();
@@ -373,10 +393,9 @@ el( 'patch-list' ).addEventListener( 'change', async ( ev ) => {
 		render();
 	} else if ( ev.target.matches( '.patch-reviewed' ) ) {
 		await send( MSG.REVIEW_PATCH, { key, value: ev.target.checked } );
-		// Turning review off must also stop the patch.
-		if ( !ev.target.checked ) {
-			await send( MSG.SET_PATCH_ENABLED, { key, value: false } );
-		}
+		// Ticking the box is the decision to run the patch, so switch it on
+		// too; a second click to do the obvious is a trap. Unticking stops it.
+		await send( MSG.SET_PATCH_ENABLED, { key, value: ev.target.checked } );
 		render();
 	}
 } );
