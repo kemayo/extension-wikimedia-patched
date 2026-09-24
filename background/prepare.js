@@ -220,7 +220,10 @@ async function attachSiblings( payload, parentSha ) {
 		listings.set( dir, await listDirectory( payload.project, parentSha, dir ) );
 	} ) );
 	for ( const file of payload.newFiles ) {
-		file.siblings = listings.get( dirname( file.path ) ) || [];
+		const names = listings.get( dirname( file.path ) );
+		file.siblings = names || [];
+		// Say so when the listing failed, so the page can explain itself.
+		file.siblingsUnknown = names === null || names === undefined;
 	}
 }
 

@@ -537,7 +537,10 @@
 		}
 		for ( const { patch, file } of pendingNewFiles ) {
 			record( patch.key, file.path, STATUS.NOT_ON_PAGE,
-				'No module on this page owns this directory.' );
+				file.siblingsUnknown ?
+					'Gerrit would not list this directory, so the extension ' +
+						'cannot tell which module owns the file. Try again later.' :
+					'No module on this page owns this directory.' );
 		}
 		for ( const patch of payload.patches ) {
 			for ( const file of patch.replaceFiles || [] ) {
