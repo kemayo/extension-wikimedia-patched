@@ -103,7 +103,7 @@ export async function readRepoJson( project, ref, path ) {
 		return null;
 	}
 	try {
-		return JSON.parse( text.replace( /^﻿/, '' ) );
+		return JSON.parse( text.replace( /^\uFEFF/, '' ) );
 	} catch ( e ) {
 		return null;
 	}

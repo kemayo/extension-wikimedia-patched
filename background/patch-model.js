@@ -71,7 +71,7 @@ export function parseJson( text ) {
 		return null;
 	}
 	try {
-		return JSON.parse( text.replace( /^﻿/, '' ) );
+		return JSON.parse( text.replace( /^\uFEFF/, '' ) );
 	} catch ( e ) {
 		return null;
 	}
