@@ -816,3 +816,67 @@ test( 'a bridge that never answers releases the modules unpatched', async () => 
 	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
 	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v1' ] );
 } );
+
+// --------------------------------------------------------------- stacking
+
+/**
+ * Two patches on one file, as a Gerrit chain gives: B is built on A.
+ */
+const STACK_WIKI = log( 'one', 'two', 'three', 'four', 'five', 'six' );
+const STACK_A = log( 'one', 'two-A', 'three', 'four', 'five', 'six' );
+const STACK_B = log( 'one', 'two-A', 'three', 'four', 'five-B', 'six' );
+
+function stackPatch( key, parentSource, source, withDeployed ) {
+	return {
+		key, changeNumber: key, patchset: 1,
+		project: 'mediawiki/extensions/VisualEditor',
+		messages: {}, styles: [], newFiles: [], skipped: [], notes: [],
+		replaceFiles: [ {
+			path: 'editcheck/modules/controller.js', kind: 'js', parentSource, source,
+			...( withDeployed ? { deployed: { ref: 'wmf/1.47.0-wmf.20', source: STACK_WIKI } } : {} )
+		} ]
+	};
+}
+
+async function runStack( order, { debug, deployed = true, a = STACK_A, b = STACK_B } = {} ) {
+	const pa = stackPatch( 'A', STACK_WIKI, a, deployed );
+	const pb = stackPatch( 'B', STACK_A, b, deployed );
+	const payload = {
+		active: true, reason: null, siteKind: 'dev', elevatedAck: false,
+		patches: order === 'AB' ? [ pa, pb ] : [ pb, pa ]
+	};
+	return runEditCheckModule( payload, { files: skewFiles( STACK_WIKI ), debug } );
+}
+
+for ( const debug of [ true, false ] ) {
+	for ( const order of [ 'AB', 'BA' ] ) {
+		test( `two patches on one file both apply (${ debug ? '' : 'no ' }debug mode, ${ order })`,
+			async () => {
+				const { page, reports } = await runStack( order, { debug } );
+				assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+					[ 'one', 'two-A', 'three', 'four', 'five-B', 'six' ],
+					'neither patch may undo the other' );
+				const rows = reports.at( -1 ).files;
+				assert.ok( rows.every( ( r ) => [ 'applied', 'merged' ].includes( r.status ) ),
+					JSON.stringify( rows ) );
+			} );
+	}
+}
+
+test( 'two patches that disagree keep the first and flag the second', async () => {
+	// B changes the same line as A, differently, and is not built on it.
+	const bad = log( 'one', 'two-B', 'three', 'four', 'five', 'six' );
+	const pa = stackPatch( 'A', STACK_WIKI, STACK_A, true );
+	const pb = stackPatch( 'B', STACK_WIKI, bad, true );
+	const { page, reports } = await runEditCheckModule(
+		{ active: true, reason: null, siteKind: 'dev', elevatedAck: false, patches: [ pa, pb ] },
+		{ files: skewFiles( STACK_WIKI ), debug: false } );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'one', 'two-A', 'three', 'four', 'five', 'six' ] );
+	const rows = reports.at( -1 ).files;
+	const b = rows.find( ( r ) => r.patchKey === 'B' );
+	assert.equal( b.status, 'conflict' );
+	assert.match( b.reason, /Kept A's version/ );
+	assert.equal( rows.find( ( r ) => r.patchKey === 'A' ).status, 'applied' );
+} );

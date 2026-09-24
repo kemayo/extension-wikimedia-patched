@@ -410,27 +410,44 @@
 	}
 
 	/**
-	 * Find the best copy of a file as the wiki has it.
+	 * Text this extension has already put in place, keyed by module and
+	 * file. When two patches touch one file, the second must build on the
+	 * first. Without this, a page that is not in debug mode used the
+	 * deployed copy for both, and the second patch quietly undid the first.
+	 */
+	const placed = new Map();
+
+	function placedId( moduleName, path ) {
+		return moduleName + '\u0000' + path;
+	}
+
+	/**
+	 * Find the best copy of a file as the page has it now.
 	 *
-	 * In debug mode the module payload holds the file verbatim, which is
-	 * exactly what runs, so nothing beats it. Otherwise use the copy on the
-	 * wiki's wmf branch, which the worker fetched. Minified code is never
-	 * used: it cannot be compared with source, let alone merged.
+	 * In order: what an earlier patch put there; the verbatim payload in
+	 * debug mode, which is exactly what runs; the copy on the wiki's wmf
+	 * branch. Minified code is never used: it cannot be compared with
+	 * source, let alone merged.
 	 *
 	 * @param {Object} mw
 	 * @param {*} liveFile Current value in the module's files map.
 	 * @param {Object} file The patch file, maybe with a `deployed` copy.
-	 * @return {{ text: string, from: string }|null}
+	 * @param {string} id From placedId().
+	 * @return {{ text: string, from: string, byPatch: string|null }|null}
 	 */
-	function wikiCopyOf( mw, liveFile, file ) {
+	function wikiCopyOf( mw, liveFile, file, id ) {
+		const earlier = placed.get( id );
+		if ( earlier ) {
+			return { text: earlier.text, from: `patch ${ earlier.patchKey }`, byPatch: earlier.patchKey };
+		}
 		if ( inDebugMode( mw ) && typeof liveFile === 'function' ) {
 			const body = extractBody( String( liveFile ) );
 			if ( body !== null ) {
-				return { text: body, from: 'the running page' };
+				return { text: body, from: 'the running page', byPatch: null };
 			}
 		}
 		if ( file.deployed && typeof file.deployed.source === 'string' ) {
-			return { text: file.deployed.source, from: file.deployed.ref };
+			return { text: file.deployed.source, from: file.deployed.ref, byPatch: null };
 		}
 		return null;
 	}
@@ -439,14 +456,105 @@
 		return typeof a === 'string' && typeof b === 'string' && normalise( a ) === normalise( b );
 	}
 
+	/** True if text parses as JavaScript. */
+	function parses( text ) {
+		try {
+			// eslint-disable-next-line no-new, no-new-func
+			new Function( text );
+			return true;
+		} catch ( e ) {
+			return false;
+		}
+	}
+
 	/**
-	 * Put a changed file into the payload.
+	 * Decide what text a changed file should have.
 	 *
 	 * Replacing the whole file brings along everything between the patch
 	 * base and the wiki's copy: master changes the wiki never got, and the
-	 * undoing of any backport it did get. So when the wiki's copy differs
-	 * from the base, merge only the patch's own changes onto it. Replace the
-	 * whole file only when the merge conflicts, and say what that costs.
+	 * undoing of any backport it did get. So when the copy differs from the
+	 * base, merge only the patch's own changes onto it.
+	 *
+	 * @param {Object} file
+	 * @param {Object|null} wiki From wikiCopyOf().
+	 * @param {string} where For the message, such as "in ext.foo".
+	 * @return {{ text: string|null, status: string, reason: string }}
+	 *   A null text means: leave the file as it is.
+	 */
+	function decideFile( file, wiki, where ) {
+		if ( !wiki ) {
+			return {
+				text: file.source, status: STATUS.APPLIED,
+				reason: `Replaced ${ where }. The base was not checked: the page is not in ` +
+					"debug mode, and the wiki's branch is not known yet. Reload to check."
+			};
+		}
+		if ( sameText( wiki.text, file.source ) ) {
+			return {
+				text: null, status: STATUS.APPLIED,
+				reason: wiki.byPatch ?
+					`Patch ${ wiki.byPatch } already makes this change.` :
+					`Already on the wiki (${ wiki.from }), so left as it is.`
+			};
+		}
+		if ( typeof file.parentSource !== 'string' ) {
+			return {
+				text: file.source, status: STATUS.APPLIED,
+				reason: `Replaced ${ where }. Gerrit gave no base to compare against.`
+			};
+		}
+		if ( sameText( wiki.text, file.parentSource ) ) {
+			return {
+				text: file.source, status: STATUS.APPLIED,
+				reason: `Replaced ${ where }. The wiki runs the patch base (${ wiki.from }).`
+			};
+		}
+
+		// ResourceLoader ends every packaged file with a newline, whether or
+		// not the file had one. Make all three agree, or that one line reads
+		// as a difference.
+		const tidy = ( text ) => text.replace( /\s*$/, '\n' );
+		const merged = merge3( tidy( file.parentSource ), tidy( wiki.text ), tidy( file.source ) );
+
+		if ( merged.clean && parses( merged.text ) ) {
+			return {
+				text: merged.text, status: STATUS.MERGED,
+				reason: `Merged ${ where }. The copy here (${ wiki.from }) differs from the ` +
+					`patch base in ${ merged.oursHunks } place(s), so only the patch's ` +
+					`${ merged.theirsHunks } change(s) were put onto it.`
+			};
+		}
+		// Clean line by line but not valid code is still a failed merge.
+		const why = merged.clean ?
+			'the merged file is not valid JavaScript' :
+			merged.reason.replace( /\.$/, '' );
+		const lines = merged.conflicts.map( ( c ) => c.baseStart ).join( ', ' );
+		const at = lines ? ` (base line ${ lines })` : '';
+
+		if ( wiki.byPatch ) {
+			// Two active patches disagree. Keep the first; never let the
+			// second undo it without a word.
+			return {
+				text: null, status: STATUS.CONFLICT,
+				reason: `Conflicts with patch ${ wiki.byPatch } ${ where }: ${ why }${ at }. ` +
+					`Kept ${ wiki.byPatch }'s version, so this patch's change to the file is ` +
+					'not applied. Turn one of them off.'
+			};
+		}
+		const drift = driftBetween( tidy( wiki.text ), tidy( file.parentSource ) );
+		return {
+			text: file.source, status: STATUS.BASE_SKEW,
+			reason: `Replaced the whole file ${ where }, because it would not merge: ` +
+				`${ why }${ at }. ` +
+				( drift ?
+					`That also removes ${ drift.onlyOurs } line(s) the wiki has (${ wiki.from }) ` +
+					`and adds ${ drift.onlyBase } line(s) from the patch base.` :
+					'The wiki copy is very different from the patch base.' )
+		};
+	}
+
+	/**
+	 * Put a changed file into a packageFiles payload.
 	 *
 	 * @param {Object} mw
 	 * @param {Object} patch
@@ -456,75 +564,14 @@
 	 * @param {string} moduleName
 	 */
 	function replaceFileInPayload( mw, patch, file, script, key, moduleName ) {
-		const where = `in ${ moduleName }`;
-		const wiki = wikiCopyOf( mw, script.files[ key ], file );
-		const replaceWhole = () => {
-			script.files[ key ] = compileFile( patch, file );
-		};
-
-		if ( !wiki ) {
-			replaceWhole();
-			record( patch.key, file.path, STATUS.APPLIED,
-				`Replaced ${ where }. The base was not checked: the page is not in ` +
-				"debug mode, and the wiki's branch is not known yet. Reload to check." );
-			return;
+		const id = placedId( moduleName, key );
+		const wiki = wikiCopyOf( mw, script.files[ key ], file, id );
+		const decision = decideFile( file, wiki, `in ${ moduleName }` );
+		if ( decision.text !== null ) {
+			script.files[ key ] = compileFile( patch, { path: file.path, source: decision.text } );
+			placed.set( id, { text: decision.text, patchKey: patch.key } );
 		}
-		if ( sameText( wiki.text, file.source ) ) {
-			// The patch is merged and deployed, or backported.
-			record( patch.key, file.path, STATUS.APPLIED,
-				`Already on the wiki (${ wiki.from }), so left as it is.` );
-			return;
-		}
-		if ( typeof file.parentSource !== 'string' ) {
-			replaceWhole();
-			record( patch.key, file.path, STATUS.APPLIED,
-				`Replaced ${ where }. Gerrit gave no base to compare against.` );
-			return;
-		}
-		if ( sameText( wiki.text, file.parentSource ) ) {
-			replaceWhole();
-			record( patch.key, file.path, STATUS.APPLIED,
-				`Replaced ${ where }. The wiki runs the patch base (${ wiki.from }).` );
-			return;
-		}
-
-		// ResourceLoader ends every packaged file with a newline, whether or
-		// not the file had one. Make all three agree, or that one line reads
-		// as a difference.
-		const tidy = ( text ) => text.replace( /\s*$/, '\n' );
-		const merged = merge3( tidy( file.parentSource ), tidy( wiki.text ), tidy( file.source ) );
-		let mergedFn = null;
-		let mergeError = null;
-		if ( merged.clean ) {
-			try {
-				mergedFn = compileFile( patch, { path: file.path, source: merged.text } );
-			} catch ( e ) {
-				// Clean line by line, but not valid code. Never run that.
-				mergeError = e;
-			}
-		}
-		if ( mergedFn ) {
-			script.files[ key ] = mergedFn;
-			record( patch.key, file.path, STATUS.MERGED,
-				`Merged ${ where }. The wiki's copy (${ wiki.from }) differs from the ` +
-				`patch base in ${ merged.oursHunks } place(s), so only the patch's ` +
-				`${ merged.theirsHunks } change(s) were put onto it.` );
-			return;
-		}
-
-		replaceWhole();
-		const drift = driftBetween( tidy( wiki.text ), tidy( file.parentSource ) );
-		const lines = merged.conflicts.map( ( c ) => c.baseStart ).join( ', ' );
-		const why = mergeError ?
-			`the merged file is not valid JavaScript (${ mergeError.message })` :
-			merged.reason.replace( /\.$/, '' );
-		record( patch.key, file.path, STATUS.BASE_SKEW,
-			`Replaced the whole file ${ where }, because it would not merge: ` +
-			`${ why }${ lines ? ` (base line ${ lines })` : '' }. ` +
-			( drift ?
-				`That also removes ${ drift.onlyOurs } line(s) the wiki has (${ wiki.from }) ` +
-				`and adds ${ drift.onlyBase } line(s) from the patch base.` :
-				'The wiki copy is very different from the patch base.' ) );
+		record( patch.key, file.path, decision.status, decision.reason );
 	}
 
 	/**
@@ -541,13 +588,16 @@
 	 * @param {string} moduleName
 	 */
 	function newFileAlreadyThere( mw, patch, file, script, key, moduleName ) {
-		const wiki = wikiCopyOf( mw, script.files[ key ], file );
+		const id = placedId( moduleName, key );
+		const wiki = wikiCopyOf( mw, script.files[ key ], file, id );
 		if ( wiki && sameText( wiki.text, file.source ) ) {
-			record( patch.key, file.path, STATUS.APPLIED,
+			record( patch.key, file.path, STATUS.APPLIED, wiki.byPatch ?
+				`Patch ${ wiki.byPatch } already adds this file.` :
 				`Already on the wiki (${ wiki.from }), so left as it is.` );
 			return;
 		}
 		script.files[ key ] = compileFile( patch, file );
+		placed.set( id, { text: file.source, patchKey: patch.key } );
 		record( patch.key, file.path, STATUS.APPLIED,
 			`${ moduleName } already has a ${ key }. Replaced it with the patch's version.` );
 	}
@@ -566,6 +616,7 @@
 	 */
 	function insertFileInPayload( patch, file, script, key, moduleName ) {
 		script.files[ key ] = compileFile( patch, file );
+		placed.set( placedId( moduleName, key ), { text: file.source, patchKey: patch.key } );
 
 		const main = script.main;
 		if ( main && main !== key && typeof script.files[ main ] === 'function' ) {
