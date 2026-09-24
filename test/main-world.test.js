@@ -21,17 +21,18 @@ async function startPage( payload, onRequest ) {
 	assert.ok( channel, 'main-world.js must publish a channel' );
 
 	const reports = [];
-	page.document.addEventListener( channel + ':out', ( ev ) => reports.push( ev.detail ) );
+	page.document.addEventListener( channel + ':out', ( ev ) => reports.push( JSON.parse( ev.detail ) ) );
 
 	// Stand in for the bridge, which relays a question to the worker.
 	const requests = [];
 	page.document.addEventListener( channel + ':req', ( ev ) => {
-		requests.push( ev.detail.message );
-		Promise.resolve( onRequest ? onRequest( ev.detail.message ) : null )
+		// The page sends a JSON string, and the bridge answers with one.
+		const { id, message } = JSON.parse( ev.detail );
+		requests.push( message );
+		Promise.resolve( onRequest ? onRequest( message ) : null )
 			.then( ( result ) => page.runScript(
 				`document.dispatchEvent( new CustomEvent( ${ JSON.stringify( channel + ':res' ) }, ` +
-				`{ detail: ${ JSON.stringify( { id: ev.detail.id, ok: true } ) } } ) );`
-					.replace( '"ok":true', '"ok":true,"result":' + JSON.stringify( result || {} ) )
+				`{ detail: ${ JSON.stringify( JSON.stringify( { id, ok: true, result: result || {} } ) ) } } ) );`
 			) );
 	} );
 	page.requests = requests;

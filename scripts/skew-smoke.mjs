@@ -37,7 +37,7 @@ async function run( label, patch, debug, { late = false } = {} ) {
 	page.runFile( 'dist/chrome/content/main-world.js' );
 	const channel = page.document.documentElement.dataset.wmpChannel;
 	const reports = [];
-	page.document.addEventListener( channel + ':out', ( ev ) => reports.push( ev.detail ) );
+	page.document.addEventListener( channel + ':out', ( ev ) => reports.push( JSON.parse( ev.detail ) ) );
 	const payload = {
 		active: true, reason: null, siteKind: 'prod', elevatedAck: true, patches: [ patch ]
 	};

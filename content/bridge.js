@@ -18,6 +18,23 @@
 
 	const MSG_GET_PAYLOAD = 'get-payload';
 	const MSG_REPORT_STATUS = 'report-status';
+	/**
+	 * Everything that crosses to or from the page goes as a JSON string.
+	 *
+	 * Firefox will not let page code read an object a content script made:
+	 * it throws "Permission denied to access property". Chrome copies the
+	 * object instead, so the bug showed only in Firefox. A string crosses in
+	 * every browser.
+	 */
+	const encode = ( value ) => JSON.stringify( value );
+	const decode = ( text ) => {
+		try {
+			return typeof text === 'string' ? JSON.parse( text ) : null;
+		} catch ( e ) {
+			return null;
+		}
+	};
+
 	// The page can reach this relay, so it passes on nothing else. The
 	// worker refuses the rest anyway; this keeps the page from even trying.
 	const RELAYABLE = new Set( [ 'get-styles' ] );
@@ -55,7 +72,7 @@
 
 	whenChannelReady( ( channel ) => {
 		const send = ( detail ) => {
-			document.dispatchEvent( new CustomEvent( channel + ':in', { detail } ) );
+			document.dispatchEvent( new CustomEvent( channel + ':in', { detail: encode( detail ) } ) );
 		};
 
 		ext.runtime.sendMessage( { type: MSG_GET_PAYLOAD } )
@@ -74,16 +91,16 @@
 
 		document.addEventListener( channel + ':out', ( ev ) => {
 			ext.runtime.sendMessage( {
-				type: MSG_REPORT_STATUS, report: ev.detail
+				type: MSG_REPORT_STATUS, report: decode( ev.detail )
 			} ).catch( () => {} );
 		} );
 
 		// Later questions from the page, such as "compile these styles for
 		// this skin". Each carries an id so the answer can be matched.
 		document.addEventListener( channel + ':req', ( ev ) => {
-			const { id, message } = ev.detail || {};
+			const { id, message } = decode( ev.detail ) || {};
 			const answer = ( detail ) => document.dispatchEvent(
-				new CustomEvent( channel + ':res', { detail: { id, ...detail } } )
+				new CustomEvent( channel + ':res', { detail: encode( { id, ...detail } ) } )
 			);
 			if ( !message || !RELAYABLE.has( message.type ) ) {
 				answer( { ok: false, error: 'Refused: not relayed.' } );

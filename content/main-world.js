@@ -32,6 +32,25 @@
 		Math.random().toString( 36 ).slice( 2 );
 	document.documentElement.dataset.wmpChannel = channel;
 
+	/**
+	 * Read what the bridge sent. It sends JSON strings, because Firefox will
+	 * not let this page-side script read an object the bridge made. An
+	 * object is still accepted, for callers on this side of the boundary.
+	 *
+	 * @param {*} detail
+	 * @return {*}
+	 */
+	function decode( detail ) {
+		if ( typeof detail !== 'string' ) {
+			return detail;
+		}
+		try {
+			return JSON.parse( detail );
+		} catch ( e ) {
+			return null;
+		}
+	}
+
 	let payload = null;
 	let payloadSettled = false;
 	const payloadWaiters = [];
@@ -60,7 +79,7 @@
 		// scripts cannot find it. This only narrows the window: the worker
 		// is what refuses a page's requests.
 		delete document.documentElement.dataset.wmpChannel;
-		settlePayload( ev.detail );
+		settlePayload( decode( ev.detail ) );
 	}, { once: true } );
 
 	// A module that arrived early waits a little for the patch data, then
@@ -90,19 +109,20 @@
 		return new Promise( ( resolve, reject ) => {
 			const id = ++nextRequestId;
 			const onResponse = ( ev ) => {
-				if ( !ev.detail || ev.detail.id !== id ) {
+				const answer = decode( ev.detail );
+				if ( !answer || answer.id !== id ) {
 					return;
 				}
 				document.removeEventListener( channel + ':res', onResponse );
-				if ( ev.detail.ok ) {
-					resolve( ev.detail.result );
+				if ( answer.ok ) {
+					resolve( answer.result );
 				} else {
-					reject( new Error( ev.detail.error || 'request failed' ) );
+					reject( new Error( answer.error || 'request failed' ) );
 				}
 			};
 			document.addEventListener( channel + ':res', onResponse );
 			document.dispatchEvent( new CustomEvent( channel + ':req', {
-				detail: { id, message }
+				detail: JSON.stringify( { id, message } )
 			} ) );
 		} );
 	}
@@ -151,7 +171,7 @@
 		reportTimer = setTimeout( () => {
 			reportTimer = null;
 			document.dispatchEvent( new CustomEvent( channel + ':out', {
-				detail: {
+				detail: JSON.stringify( {
 					files: results.slice(),
 					siteNote,
 					// Without these the popup cannot tell "nothing matched"
@@ -162,7 +182,7 @@
 					version: wikiVersion(),
 					held: heldStats,
 					ranAt: Date.now()
-				}
+				} )
 			} ) );
 		}, 50 );
 	}
