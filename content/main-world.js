@@ -63,10 +63,20 @@
 		settlePayload( ev.detail );
 	}, { once: true } );
 
-	// If the bridge never answers, carry on without patches.
+	// A module that arrived early waits a little for the patch data, then
+	// runs unpatched. That must not end the wait for the data itself: a
+	// slow worker would then cost the page every later module too.
+	let holdExpired = false;
+	let releaseHeld = () => {};
+	setTimeout( () => {
+		holdExpired = true;
+		safely( releaseHeld );
+	}, IMPL_BUFFER_TIMEOUT_MS );
+
+	// If the bridge never answers at all, say so in the report.
 	setTimeout( () => settlePayload( {
 		active: false, reason: 'timed-out', patches: []
-	} ), IMPL_BUFFER_TIMEOUT_MS );
+	} ), PAYLOAD_GIVE_UP_MS );
 
 	/**
 	 * Ask the background worker something, through the bridge.
@@ -1135,7 +1145,7 @@
 		 * @return {boolean}
 		 */
 		function mayWait( name ) {
-			if ( BASE_MODULES.includes( name ) ) {
+			if ( holdExpired || BASE_MODULES.includes( name ) ) {
 				return false;
 			}
 			const entry = loader.moduleRegistry && loader.moduleRegistry[ name ];
@@ -1161,9 +1171,9 @@
 			return implNow( this, name, data );
 		};
 
-		// Once the patch data is in, or the wait has timed out, release the
+		// Once the patch data is in, or the hold has run out, release the
 		// held modules in the order they arrived.
-		onPayload( () => {
+		releaseHeld = () => {
 			const released = held.splice( 0 );
 			for ( const item of released ) {
 				const entry = loader.moduleRegistry[ item.name ];
@@ -1184,10 +1194,12 @@
 			if ( released.length ) {
 				heldStats = {
 					count: released.length,
-					longestMs: Math.max( ...released.map( ( r ) => Date.now() - r.at ) )
+					longestMs: Math.max( ...released.map( ( r ) => Date.now() - r.at ) ),
+					patched: payloadSettled
 				};
 			}
-		} );
+		};
+		onPayload( () => releaseHeld() );
 	}
 
 	function onMw( mw ) {

@@ -95,6 +95,34 @@ async function handleAddPatch( input ) {
 	return payload;
 }
 
+/** Refreshes in flight, so many callers share one read of Gerrit. */
+const refreshing = new Map();
+
+/**
+ * Get a patch's payload without waiting for Gerrit if at all possible.
+ *
+ * An old copy is used at once and read again in the background. Only a
+ * patch with no copy at all waits, and adding a patch makes its copy.
+ *
+ * @param {string} key
+ * @return {Promise<Object>}
+ */
+async function payloadFor( key ) {
+	const cached = await store.readCachedPayload( key );
+	if ( cached ) {
+		if ( cached.stale && !refreshing.has( key ) ) {
+			refreshing.set( key, handleRefreshPatch( key )
+				.catch( () => null )
+				.finally( () => refreshing.delete( key ) ) );
+		}
+		return cached.payload;
+	}
+	if ( !refreshing.has( key ) ) {
+		refreshing.set( key, handleRefreshPatch( key ).finally( () => refreshing.delete( key ) ) );
+	}
+	return refreshing.get( key );
+}
+
 /** Read a patch again from Gerrit, keeping the pinned patchset. */
 async function handleRefreshPatch( key ) {
 	const patches = await store.getPatches();
@@ -140,15 +168,11 @@ async function buildPagePayload( origin ) {
 	const patches = order.map( ( key ) => ready.find( ( p ) => p.key === key ) );
 	const payloads = [];
 	for ( const patch of patches ) {
-		let payload = await store.getCachedPayload( patch.key );
-		if ( !payload ) {
-			try {
-				payload = await handleRefreshPatch( patch.key );
-			} catch ( e ) {
-				continue;
-			}
+		try {
+			payloads.push( await payloadFor( patch.key ) );
+		} catch ( e ) {
+			// No copy and Gerrit is not answering: leave this one out.
 		}
-		payloads.push( payload );
 	}
 	return {
 		active: payloads.length > 0,
@@ -233,9 +257,9 @@ async function refreshAllBadges() {
 async function warmDeployed( version ) {
 	const patches = ( await store.getPatches() ).filter( ( p ) => p.enabled && p.reviewed );
 	await Promise.all( patches.map( async ( patch ) => {
-		const payload = await store.getCachedPayload( patch.key );
-		if ( payload ) {
-			await withDeployed( payload, version );
+		const cached = await store.readCachedPayload( patch.key );
+		if ( cached ) {
+			await withDeployed( cached.payload, version );
 		}
 	} ) );
 }
@@ -309,7 +333,10 @@ async function buildStyles( skinKey, version ) {
 	const out = [];
 
 	for ( const patch of patches ) {
-		const payload = await store.getCachedPayload( patch.key );
+		let payload = null;
+		try {
+			payload = await payloadFor( patch.key );
+		} catch ( e ) {}
 		for ( const style of ( payload && payload.pendingStyles ) || [] ) {
 			const key = `${ patch.key }|${ skinKey }|${ version }|${ style.path }`;
 			if ( styleCache.has( key ) ) {
@@ -402,11 +429,9 @@ async function dispatch( msg, sender ) {
 		case MSG.REFRESH_PATCH:
 			return { payload: await handleRefreshPatch( msg.key ) };
 
-		case MSG.GET_PATCH_PAYLOAD: {
-			// Serve the cache. Only read Gerrit again when the cache expired.
-			const cached = await store.getCachedPayload( msg.key );
-			return { payload: cached || await handleRefreshPatch( msg.key ) };
-		}
+		case MSG.GET_PATCH_PAYLOAD:
+			// An old copy draws the popup at once; a fresh one follows.
+			return { payload: await payloadFor( msg.key ) };
 
 		case MSG.GET_PAYLOAD: {
 			// Only a content script may ask, and only for its own origin.

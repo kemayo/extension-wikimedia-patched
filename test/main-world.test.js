@@ -1077,3 +1077,38 @@ for ( const reason of [ 'timed-out', 'error', 'no-worker', 'something-new' ] ) {
 		assert.deepEqual( logs.map( ( l ) => l.level ), [ 'warn' ] );
 	} );
 }
+
+// ------------------------------------------------------------ slow bridge
+
+test( 'patch data that comes late still patches the modules after it', async () => {
+	// A cold worker reading Gerrit took 5.6s for change 1321624. VE loads
+	// when the user starts to edit, long after that.
+	const { page, reports, answer, respond } = await pageWithSlowBridge();
+	await page.flush( 2500 );
+	answer( CONTROLLER_PATCH );
+	respond( 'ext.visualEditor.editCheck', CONTROLLER_FILES );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	await page.flush( 100 );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ] );
+	assert.equal( rowFor( reports, 'editcheck/modules/controller.js' ).status, 'applied' );
+} );
+
+test( 'a module released unpatched at the timeout is reported, and later ones are patched', async () => {
+	const { page, reports, answer, respond } = await pageWithSlowBridge();
+	// This one arrives early and cannot wait past the hold.
+	respond( 'ext.early', { 'editcheck/modules/init.js': "mw.editcheck.log.push( 'early' );" } );
+	await page.flush( 2200 );
+	assert.equal( page.window.mw.loader.moduleRegistry[ 'ext.early' ].state, 'loaded',
+		'released after the hold ran out' );
+
+	answer( patchWith( {
+		replaceFiles: [
+			{ path: 'editcheck/modules/controller.js', kind: 'js', parentSource: OLD_CONTROLLER,
+				source: "mw.editcheck.log.push( 'controller v2' );" }
+		]
+	} ) );
+	respond( 'ext.visualEditor.editCheck', CONTROLLER_FILES );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	await page.flush( 100 );
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ] );
+} );

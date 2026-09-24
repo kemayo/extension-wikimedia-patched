@@ -94,8 +94,15 @@ export const ELEVATED_GROUPS = [
  */
 export const BASE_MODULES = [ 'jquery', 'mediawiki.base' ];
 
-/** Milliseconds the impl wrapper waits for patch data before it gives up. */
+/**
+ * Milliseconds a module that arrived early may wait for the patch data.
+ * After that it runs unpatched. The data still applies to modules that
+ * arrive later, such as VisualEditor when the user starts to edit.
+ */
 export const IMPL_BUFFER_TIMEOUT_MS = 2000;
+
+/** Milliseconds after which a page stops waiting for the patch data at all. */
+export const PAYLOAD_GIVE_UP_MS = 30000;
 
 /** Cookie that turns on ResourceLoader debug mode. */
 export const DEBUG_COOKIE = 'resourceLoaderDebug';

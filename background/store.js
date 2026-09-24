@@ -85,14 +85,30 @@ export async function hasProductionAck( origin ) {
 	return Boolean( ( got[ SESSION_PROD_ACK ] || {} )[ origin ] );
 }
 
-export async function getCachedPayload( key ) {
+/**
+ * Read a cached payload, however old.
+ *
+ * An old copy is still the right code for its patchset: a patchset never
+ * changes. What ages is the rest, such as the dependencies. So a caller
+ * uses the copy at once and refreshes it in the background, and a page
+ * never waits for Gerrit.
+ *
+ * @param {string} key
+ * @return {Promise<{ payload: Object, stale: boolean }|null>}
+ */
+export async function readCachedPayload( key ) {
 	const storageKey = PAYLOAD_PREFIX + key;
 	const got = await ext.storage.local.get( storageKey );
 	const entry = got[ storageKey ];
-	if ( !entry || Date.now() - entry.fetchedAt > PAYLOAD_TTL_MS ) {
+	if ( !entry ) {
 		return null;
 	}
-	return entry.payload;
+	return { payload: entry.payload, stale: isStale( entry.fetchedAt, Date.now() ) };
+}
+
+/** True once a cached copy is old enough to read again. */
+export function isStale( fetchedAt, now ) {
+	return !( now - fetchedAt <= PAYLOAD_TTL_MS );
 }
 
 export async function setCachedPayload( key, payload ) {
