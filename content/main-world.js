@@ -22,6 +22,7 @@
 
 	// @include shared/constants.js
 	// @include shared/resolve-module.js
+	// @include shared/verify-base.js
 
 	// ---------------------------------------------------------------- channel
 
@@ -275,6 +276,147 @@
 			`Added to ${ target.module } as ${ target.key }.` );
 	}
 
+	// -------------------------------------------------------------- rewriting
+
+	/**
+	 * Compile one patched file into the shape ResourceLoader uses.
+	 *
+	 * The sourceURL comment makes the file show up by name in the debugger,
+	 * instead of as an anonymous eval.
+	 *
+	 * @param {Object} patch
+	 * @param {Object} file
+	 * @return {Function}
+	 */
+	function compileFile( patch, file ) {
+		const sourceUrl = `wikimedia-patched://${ patch.changeNumber }/${ file.path }`;
+		return new Function( 'require', 'module', 'exports',
+			file.source + '\n//# sourceURL=' + sourceUrl + '\n' );
+	}
+
+	/**
+	 * Put a changed file into the payload, in place of the deployed one.
+	 *
+	 * @param {Object} patch
+	 * @param {Object} file
+	 * @param {Object} script The payload's script object.
+	 * @param {string} key
+	 * @param {string} moduleName
+	 */
+	function replaceFileInPayload( patch, file, script, key, moduleName ) {
+		const verdict = compareBase( script.files[ key ], file.parentSource );
+		script.files[ key ] = compileFile( patch, file );
+
+		if ( verdict === 'differs' ) {
+			record( patch.key, file.path, STATUS.BASE_SKEW,
+				`Replaced in ${ moduleName }. The wiki runs a different version of ` +
+				'this file, so the patch may not fit.' );
+		} else if ( verdict === 'match' ) {
+			record( patch.key, file.path, STATUS.APPLIED,
+				`Replaced in ${ moduleName }. The wiki runs the patch base.` );
+		} else {
+			record( patch.key, file.path, STATUS.APPLIED,
+				`Replaced in ${ moduleName }. The base was not checked, because the ` +
+				'page is not in debug mode.' );
+		}
+	}
+
+	/**
+	 * Add a new file to the payload, and make the module's main file load it.
+	 *
+	 * ResourceLoader runs only what the main file requires, so a file that
+	 * nothing requires would never run.
+	 *
+	 * @param {Object} patch
+	 * @param {Object} file
+	 * @param {Object} script
+	 * @param {string} key
+	 * @param {string} moduleName
+	 */
+	function insertFileInPayload( patch, file, script, key, moduleName ) {
+		script.files[ key ] = compileFile( patch, file );
+
+		const main = script.main;
+		if ( main && main !== key && typeof script.files[ main ] === 'function' ) {
+			const originalMain = script.files[ main ];
+			const relative = relativeRequirePath( main, key );
+			script.files[ main ] = function ( require, module, exports ) {
+				const result = originalMain( require, module, exports );
+				// require() caches, so this is safe even if main already asked.
+				require( relative );
+				return result;
+			};
+		}
+		record( patch.key, file.path, STATUS.APPLIED_NEW,
+			`Added to ${ moduleName } as ${ key }.` );
+	}
+
+	/**
+	 * Change a module payload before the page runs it.
+	 *
+	 * This is the only moment the extension can replace a file. Once the
+	 * module runs, its code is in effect and re-running it would repeat
+	 * every side effect.
+	 *
+	 * @param {Object} mw
+	 * @param {string} name
+	 * @param {Array} data The array the declarator returned.
+	 */
+	function rewriteModulePayload( mw, name, data ) {
+		if ( !payload || !payload.active ) {
+			return;
+		}
+		const guard = checkPage( mw );
+		if ( !guard.ok ) {
+			for ( const patch of payload.patches ) {
+				record( patch.key, '(page)', guard.status, guard.reason );
+			}
+			return;
+		}
+
+		const script = data[ 1 ];
+		if ( !script || typeof script !== 'object' || !script.files ) {
+			// A scripts-only module is one blob. There is no way to tell
+			// which part came from which file.
+			if ( script ) {
+				legacyModules.push( name );
+			}
+			return;
+		}
+
+		const entry = { name, files: Object.keys( script.files ) };
+
+		// Replace first, so a new main file is in place before it is wrapped.
+		for ( const patch of payload.patches ) {
+			for ( const file of patch.replaceFiles || [] ) {
+				const hit = matchFileToModule( file.path, [ entry ] );
+				if ( hit.status !== 'exact' && hit.status !== 'suffix' ) {
+					continue;
+				}
+				const key = hit.matches[ 0 ].key;
+				safely( replaceFileInPayload, patch, file, script, key, name );
+				anchors.push( { repoPath: file.path, module: name, key } );
+			}
+		}
+
+		const known = seenModules.concat( [ entry ] );
+		for ( const patch of payload.patches ) {
+			for ( const file of patch.newFiles || [] ) {
+				if ( insertedNewFiles.has( file ) ) {
+					continue;
+				}
+				const target = inferModuleForNewFile(
+					file.path, file.siblings || [], known, anchors
+				);
+				if ( target.module !== name ) {
+					continue;
+				}
+				insertedNewFiles.add( file );
+				safely( insertFileInPayload, patch, file, script, target.key, name );
+			}
+		}
+	}
+
 	// ------------------------------------------------------- module bookkeeping
 
 	/** Modules seen on this page: name to the keys of its packaged files. */
@@ -283,6 +425,10 @@
 	const anchors = [];
 	/** New files still waiting for their module. */
 	const pendingNewFiles = [];
+	/** New files already put into a module payload. */
+	const insertedNewFiles = new Set();
+	/** Modules that do not use packageFiles, so the extension cannot see inside. */
+	const legacyModules = [];
 
 	function moduleEntry( name, script ) {
 		const files = script && typeof script === 'object' && script.files ?
@@ -339,6 +485,9 @@
 				}
 			}
 			for ( const file of patch.newFiles || [] ) {
+				if ( insertedNewFiles.has( file ) ) {
+					continue;
+				}
 				if ( !pendingNewFiles.some( ( p ) => p.file === file ) ) {
 					pendingNewFiles.push( { patch, file } );
 				}
@@ -353,6 +502,10 @@
 	function placePendingFiles( mw ) {
 		for ( let i = pendingNewFiles.length - 1; i >= 0; i-- ) {
 			const { patch, file } = pendingNewFiles[ i ];
+			if ( insertedNewFiles.has( file ) ) {
+				pendingNewFiles.splice( i, 1 );
+				continue;
+			}
 			const target = inferModuleForNewFile(
 				file.path, file.siblings || [], seenModules, anchors
 			);
@@ -393,15 +546,18 @@
 				const hit = matchFileToModule( file.path, seenModules );
 				if ( hit.status === 'none' ) {
 					record( patch.key, file.path, STATUS.NOT_ON_PAGE,
-						'No module on this page holds this file.' );
+						'No module on this page holds this file.' + ( legacyModules.length ?
+							' Some modules here do not use packageFiles, and the ' +
+							'extension cannot see inside those.' : '' ) );
 				} else if ( hit.status === 'ambiguous' ) {
 					record( patch.key, file.path, STATUS.AMBIGUOUS,
 						'Could be ' + hit.matches.map( ( m ) => m.module ).join( ' or ' ) + '.' );
 				} else {
-					// Phase 3 replaces the file. Until then, say so.
-					record( patch.key, file.path, STATUS.NOT_ON_PAGE,
-						`Found in ${ hit.matches[ 0 ].module }. Replacing an existing ` +
-						'file is not built yet.' );
+					// The module arrived before the extension was ready, so
+					// its payload could not be changed.
+					record( patch.key, file.path, STATUS.TIMED_OUT,
+						`Found in ${ hit.matches[ 0 ].module }, but that module loaded ` +
+						'before the extension was ready. Reload the page.' );
 				}
 			}
 			for ( const skipped of patch.skipped || [] ) {
@@ -479,7 +635,7 @@
 				return originalImpl.apply( this, arguments );
 			}
 
-			// TODO(phase 3): change `data` here to replace a file.
+			safely( rewriteModulePayload, mw, name, data );
 
 			let result;
 			try {

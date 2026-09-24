@@ -41,7 +41,7 @@ async function currentTabReport() {
 	return { tab, report };
 }
 
-function renderFileRows( tbody, rows ) {
+function renderFileRows( tbody, rows, patch ) {
 	tbody.replaceChildren();
 	for ( const row of rows ) {
 		const [ label, cls ] = STATUS_LABEL[ row.status ] || [ row.status, 's-skip' ];
@@ -49,7 +49,19 @@ function renderFileRows( tbody, rows ) {
 
 		const path = document.createElement( 'td' );
 		path.className = 'path';
-		path.textContent = row.path;
+		// Link to the file's diff. Gerrit shows it better than the popup can,
+		// which matters most when the base does not match.
+		if ( patch && !row.path.startsWith( '(' ) ) {
+			const link = document.createElement( 'a' );
+			link.href = `${ GERRIT_BASE }/c/${ patch.project }/+/${ patch.changeNumber }/` +
+				`${ patch.patchset }/${ row.path }`;
+			link.target = '_blank';
+			link.rel = 'noreferrer';
+			link.textContent = row.path;
+			path.append( link );
+		} else {
+			path.textContent = row.path;
+		}
 
 		const status = document.createElement( 'td' );
 		status.className = 'status ' + cls;
@@ -141,7 +153,7 @@ function renderPatch( patch, payload, report ) {
 
 	if ( payload ) {
 		renderFileRows( node.querySelector( 'table.files tbody' ),
-			fileRowsFor( payload, report ) );
+			fileRowsFor( payload, report ), patch );
 	}
 
 	return node;

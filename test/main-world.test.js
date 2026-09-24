@@ -317,3 +317,157 @@ test( 'a module that loads before the bridge answers is still patched', async ()
 	const row = reports.at( -1 ).files.find( ( f ) => f.path.endsWith( 'Late.js' ) );
 	assert.equal( row.status, 'applied-new' );
 } );
+
+// ---------------------------------------------------------------- replacement
+
+/**
+ * Build a module payload exactly as ResourceLoader writes one in debug
+ * mode: a real function per file, with the source verbatim and a newline
+ * before the closing brace.
+ *
+ * @param {string} name
+ * @param {string} main
+ * @param {Object<string,string>} files Key to file source.
+ * @return {string}
+ */
+function modulePayload( name, main, files ) {
+	const parts = Object.entries( files ).map( ( [ key, body ] ) =>
+		`${ JSON.stringify( key ) }:function(require,module,exports){${ body }\n}` );
+	return `mw.loader.impl(function(){return[${ JSON.stringify( name + '@' ) },` +
+		`{"main":${ JSON.stringify( main ) },"files":{${ parts.join( ',' ) }}}];});`;
+}
+
+const OLD_CONTROLLER = "mw.editcheck.log.push( 'controller v1' );";
+const OLD_INIT = "require( './controller.js' );";
+
+async function runEditCheckModule( payload ) {
+	const { page, reports } = await startPage( payload );
+	bootMediaWiki( page );
+	page.runScript( 'mw.editcheck = { log: [] };' );
+	page.runScript( modulePayload( 'ext.visualEditor.editCheck', 'editcheck/modules/init.js', {
+		'editcheck/modules/controller.js': OLD_CONTROLLER,
+		'editcheck/modules/init.js': OLD_INIT
+	} ) );
+	await page.flush( 10 );
+	await page.window.mw.loader.using( 'ext.visualEditor.editCheck' );
+	await page.flush( 100 );
+	return { page, reports };
+}
+
+test( 'a changed file is replaced before the module runs', async () => {
+	const { page, reports } = await runEditCheckModule( patchWith( {
+		replaceFiles: [ {
+			path: 'editcheck/modules/controller.js',
+			kind: 'js',
+			parentSource: OLD_CONTROLLER,
+			source: "mw.editcheck.log.push( 'controller v2' );"
+		} ]
+	} ) );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ],
+		'the patched file ran, and the deployed one did not' );
+
+	const row = reports.at( -1 ).files
+		.find( ( f ) => f.path === 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'applied' );
+	assert.match( row.reason, /runs the patch base/ );
+} );
+
+test( 'a patch written against a different base is applied and flagged', async () => {
+	const { page, reports } = await runEditCheckModule( patchWith( {
+		replaceFiles: [ {
+			path: 'editcheck/modules/controller.js',
+			kind: 'js',
+			// The wiki runs something else, as a wmf branch would.
+			parentSource: "mw.editcheck.log.push( 'controller v0' );",
+			source: "mw.editcheck.log.push( 'controller v2' );"
+		} ]
+	} ) );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'controller v2' ],
+		'skew warns, it does not block' );
+	const row = reports.at( -1 ).files
+		.find( ( f ) => f.path === 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'base-skew' );
+	assert.match( row.reason, /different version/ );
+} );
+
+test( 'an unverifiable base is applied and said to be unchecked', async () => {
+	const { reports } = await runEditCheckModule( patchWith( {
+		replaceFiles: [ {
+			path: 'editcheck/modules/controller.js',
+			kind: 'js',
+			parentSource: null,
+			source: "mw.editcheck.log.push( 'controller v2' );"
+		} ]
+	} ) );
+	const row = reports.at( -1 ).files
+		.find( ( f ) => f.path === 'editcheck/modules/controller.js' );
+	assert.equal( row.status, 'applied' );
+	assert.match( row.reason, /not in debug mode/ );
+} );
+
+test( 'a new file is required by the module main file, in order', async () => {
+	const { page, reports } = await runEditCheckModule( patchWith( {
+		newFiles: [ {
+			path: 'editcheck/modules/Extra.js',
+			kind: 'js',
+			siblings: [ 'controller.js', 'init.js' ],
+			source: "mw.editcheck.log.push( 'extra' );"
+		} ]
+	} ) );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ],
+		[ 'controller v1', 'extra' ],
+		'the added file runs as part of the module, after its own files' );
+	const row = reports.at( -1 ).files.find( ( f ) => f.path === 'editcheck/modules/Extra.js' );
+	assert.equal( row.status, 'applied-new' );
+	assert.match( row.reason, /editcheck\/modules\/Extra\.js/ );
+} );
+
+test( 'replacing the main file and adding a file work together', async () => {
+	const { page } = await runEditCheckModule( patchWith( {
+		replaceFiles: [ {
+			path: 'editcheck/modules/init.js',
+			kind: 'js',
+			parentSource: OLD_INIT,
+			source: "mw.editcheck.log.push( 'new init' );"
+		} ],
+		newFiles: [ {
+			path: 'editcheck/modules/Extra.js',
+			kind: 'js',
+			siblings: [ 'controller.js', 'init.js' ],
+			source: "mw.editcheck.log.push( 'extra' );"
+		} ]
+	} ) );
+	// The new main no longer loads controller.js, and the added file still runs.
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'new init', 'extra' ] );
+} );
+
+test( 'a scripts-only module is left alone and reported', async () => {
+	const { page, reports } = await startPage( patchWith( {
+		replaceFiles: [ {
+			path: 'resources/src/legacy/thing.js',
+			kind: 'js',
+			parentSource: 'old();',
+			source: 'patched();'
+		} ]
+	} ) );
+	bootMediaWiki( page );
+	page.runScript( 'mw.editcheck = { log: [] };' );
+	page.runScript(
+		'mw.loader.impl( function () { return [ "legacy.module@", ' +
+		'function ( $, jQuery, require, module ) { mw.editcheck.log.push( "legacy" ); } ]; } );'
+	);
+	await page.flush( 10 );
+	await page.window.mw.loader.using( 'legacy.module' );
+	page.runScript( 'window.dispatchEvent( { type: "load" } );' );
+	await page.flush( 1700 );
+
+	assert.deepEqual( [ ...page.runScript( 'mw.editcheck.log' ) ], [ 'legacy' ],
+		'the module still works' );
+	const row = reports.flatMap( ( r ) => r.files )
+		.find( ( f ) => f.path === 'resources/src/legacy/thing.js' );
+	assert.equal( row.status, 'not-on-page' );
+	assert.match( row.reason, /do not use packageFiles/ );
+} );
