@@ -3,6 +3,13 @@
  * the popup and the build script.
  */
 
+/**
+ * Which build this code came from. build.mjs stamps it. The popup is read
+ * from disk each time it opens, but a running background worker keeps the
+ * code it started with, so after a rebuild the two can differ.
+ */
+export const BUILD_ID = 'dev';
+
 export const GERRIT_ORIGIN = 'https://gerrit.wikimedia.org';
 export const GERRIT_BASE = GERRIT_ORIGIN + '/r';
 

@@ -14,6 +14,11 @@
 	</label>
 </header>
 
+<div id="stale-worker" class="danger-inline" hidden>
+	<p>The extension was rebuilt, but its background worker is still the old
+	one. Reload it so the two match.</p>
+	<button type="button" id="reload-extension">Reload the extension</button>
+</div>
 <div id="site-status" class="site-status" hidden>
 	<p id="site-status-text"></p>
 	<button type="button" id="site-allow" hidden>Allow on this site</button>

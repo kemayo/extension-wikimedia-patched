@@ -18,6 +18,7 @@ import {
 const ROOT = dirname( fileURLToPath( import.meta.url ) );
 const DIST = join( ROOT, 'dist' );
 const VERSION = '0.1.0';
+const BUILD_ID = new Date().toISOString();
 
 const SOURCE_DIRS = [ 'background', 'content', 'shared', 'popup', 'options', 'icons', 'vendor' ];
 
@@ -243,6 +244,11 @@ async function buildOne( name, manifest ) {
 	for ( const dir of SOURCE_DIRS ) {
 		await cp( join( ROOT, dir ), join( out, dir ), { recursive: true } ).catch( () => {} );
 	}
+	// Stamp the build, so the popup can tell when the worker is older.
+	const constants = join( out, 'shared/constants.js' );
+	await writeFile( constants, ( await readFile( constants, 'utf8' ) )
+		.replace( "export const BUILD_ID = 'dev';", `export const BUILD_ID = '${ BUILD_ID }';` ) );
+
 	// Content scripts cannot import, so their includes are pasted in.
 	for ( const file of [ 'content/main-world.js', 'content/bridge.js' ] ) {
 		const src = await readFile( join( ROOT, file ), 'utf8' );

@@ -3,7 +3,8 @@
  */
 
 import { ext } from '../shared/webext.js';
-import { MSG, STATUS, GERRIT_BASE, optionalPatternFor } from '../shared/constants.js';
+import { BUILD_ID, MSG, STATUS, GERRIT_BASE, optionalPatternFor } from '../shared/constants.js';
+import { stackOrder } from '../shared/stack-order.js';
 
 const el = ( id ) => document.getElementById( id );
 
@@ -270,13 +271,19 @@ async function render() {
 
 	renderElevatedWarning( report );
 
+	// Popup and worker must come from the same build, or their messages
+	// disagree. Only a reload of the extension restarts the worker.
+	el( 'stale-worker' ).hidden = state.buildId === BUILD_ID;
+
 	const list = el( 'patch-list' );
 	list.replaceChildren();
 	el( 'empty' ).hidden = state.patches.length > 0;
-	el( 'stack-cycle' ).hidden = !state.stack.cycle;
 
-	// Show the patches in the order they run, which the dependencies decide.
-	const inOrder = state.stack.order
+	// Show the patches in the order they run. The popup works this out from
+	// the same code the worker uses, rather than trusting a worker field.
+	const stack = stackOrder( state.patches );
+	el( 'stack-cycle' ).hidden = !stack.cycle;
+	const inOrder = stack.order
 		.map( ( key ) => state.patches.find( ( p ) => p.key === key ) )
 		.filter( Boolean );
 	lastState = state;
@@ -287,7 +294,7 @@ async function render() {
 		} catch ( e ) {
 			// A network problem must not empty the list.
 		}
-		list.append( renderPatch( patch, payload, report, state.stack.after[ patch.key ] || [] ) );
+		list.append( renderPatch( patch, payload, report, stack.after[ patch.key ] || [] ) );
 	}
 
 	// The stack check reads Gerrit, so draw the list first and fill it in.
@@ -408,6 +415,10 @@ function renderElevatedWarning( report ) {
 	el( 'elevated-text' ).textContent = blocked.reason;
 	box.hidden = false;
 }
+
+el( 'reload-extension' ).addEventListener( 'click', () => {
+	ext.runtime.reload();
+} );
 
 el( 'site-allow' ).addEventListener( 'click', async ( ev ) => {
 	const origin = ev.target.dataset.origin;

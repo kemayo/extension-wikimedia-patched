@@ -8,7 +8,7 @@
 
 import { ext } from '../shared/webext.js';
 import {
-	MSG, DEV_WIKI_MATCHES, PROD_WIKI_MATCHES, NON_WIKI_MATCHES
+	BUILD_ID, MSG, DEV_WIKI_MATCHES, PROD_WIKI_MATCHES, NON_WIKI_MATCHES
 } from '../shared/constants.js';
 import { parsePatchRef } from './gerrit.js';
 import { preparePatch } from './prepare.js';
@@ -369,11 +369,10 @@ const CHANGES_BADGES = new Set( [
 async function dispatch( msg, sender ) {
 	switch ( msg.type ) {
 		case MSG.GET_STATE: {
-			const patches = await store.getPatches();
 			return {
 				enabled: await store.isEnabled(),
-				patches,
-				stack: stackOrder( patches )
+				patches: await store.getPatches(),
+				buildId: BUILD_ID
 			};
 		}
 
