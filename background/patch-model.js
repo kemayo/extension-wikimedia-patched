@@ -54,6 +54,26 @@ export function classifyPath( path ) {
 	return KIND.SERVER;
 }
 
+/**
+ * Say what an i18n file is for.
+ *
+ * qqq.json is not a language: it holds notes for translators, and no page
+ * ever shows it.
+ *
+ * @param {string} path
+ * @return {'english'|'documentation'|'translation'}
+ */
+export function i18nRole( path ) {
+	const name = path.split( '/' ).pop().toLowerCase();
+	if ( name === 'en.json' ) {
+		return 'english';
+	}
+	if ( name === 'qqq.json' ) {
+		return 'documentation';
+	}
+	return 'translation';
+}
+
 /** True if the extension can deliver this kind of file to the page. */
 export function isClientSide( kind ) {
 	return kind === KIND.JS || kind === KIND.CSS || kind === KIND.LESS ||

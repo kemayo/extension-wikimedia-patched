@@ -9,7 +9,7 @@ import {
 	getChange, pickRevision, listFiles, getFileContent, resolveChangeNumber
 } from './gerrit.js';
 import {
-	KIND, classifyPath, isClientSide, diffMessages, diffManifest
+	KIND, classifyPath, isClientSide, diffMessages, diffManifest, i18nRole
 } from './patch-model.js';
 import { modulePrefixesForProject, mountFor, installedPath } from '../shared/mw-layout.js';
 import { listDirectory } from './gitiles.js';
@@ -149,15 +149,21 @@ export async function preparePatch( ref ) {
 	return payload;
 }
 
-/** Merge the English messages a patch adds. Other languages are not applied. */
+/** Add a note to the patch, once. */
 function handleManifestFileNote( payload, text ) {
 	if ( !payload.notes.includes( text ) ) {
 		payload.notes.push( text );
 	}
 }
 
+/** Merge the English messages a patch adds. Other languages are not applied. */
 function handleI18n( payload, path, parentSource, source ) {
-	if ( !/\/en\.json$/.test( path ) ) {
+	const role = i18nRole( path );
+	if ( role === 'documentation' ) {
+		// Notes for translators. Nothing to apply and nothing to say.
+		return;
+	}
+	if ( role === 'translation' ) {
 		handleManifestFileNote( payload,
 			`${ path }: only English messages are applied.` );
 		return;

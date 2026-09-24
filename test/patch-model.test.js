@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-	KIND, classifyPath, isClientSide, diffMessages, diffManifest
+	KIND, classifyPath, isClientSide, diffMessages, diffManifest, i18nRole
 } from '../background/patch-model.js';
 
 test( 'classifies the files of change 1321624', () => {
@@ -75,4 +75,11 @@ test( 'diffManifest reports no other change when only modules move', () => {
 	const before = JSON.stringify( { ResourceModules: { 'ext.x': { styles: [] } } } );
 	const after = JSON.stringify( { ResourceModules: { 'ext.x': { styles: [ 'a.css' ] } } } );
 	assert.equal( diffManifest( before, after ).otherChanges, false );
+} );
+
+test( 'qqq.json is documentation, not a language', () => {
+	assert.equal( i18nRole( 'editcheck/i18n/en.json' ), 'english' );
+	assert.equal( i18nRole( 'editcheck/i18n/qqq.json' ), 'documentation' );
+	assert.equal( i18nRole( 'i18n/de.json' ), 'translation' );
+	assert.equal( i18nRole( 'i18n/api/en.json' ), 'english' );
 } );
